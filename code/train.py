@@ -1,7 +1,7 @@
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from model import PoseDetectionModel, gaussian_nll_loss, mask_loss
+from model import PoseDetectionModel, mse_loss, nll_loss, invis_loss, mask_loss
 import os
 
 from pycocotools.coco import COCO
@@ -137,9 +137,11 @@ def train():
             pred_mask, pred_x, pred_y, pred_ln_var = model(imgs)
             
             l_mask = mask_loss(pred_mask, masks_gt)
-            l_kpt = gaussian_nll_loss(pred_x, pred_y, pred_ln_var, kpts_x_gt, kpts_y_gt, kpts_mask_gt, masks_gt)
+            l_mse = mse_loss(pred_x, pred_y, kpts_x_gt, kpts_y_gt, kpts_mask_gt)
+            l_nll = nll_loss(pred_x, pred_y, pred_ln_var, kpts_x_gt, kpts_y_gt, kpts_mask_gt)
+            l_inv = invis_loss(pred_ln_var, kpts_mask_gt)
             
-            loss = l_mask + l_kpt
+            loss = l_mask + (l_mse + l_nll) / 2 + l_inv * 0.1
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -167,9 +169,10 @@ def train():
             pred_mask, pred_x, pred_y, pred_ln_var = model(imgs)
             
             l_mask = mask_loss(pred_mask, masks_gt)
-            l_kpt = gaussian_nll_loss(pred_x, pred_y, pred_ln_var, kpts_x_gt, kpts_y_gt, kpts_mask_gt, masks_gt)
+            l_nll = nll_loss(pred_x, pred_y, pred_ln_var, kpts_x_gt, kpts_y_gt, kpts_mask_gt)
+            l_inv = invis_loss(pred_ln_var, kpts_mask_gt)
             
-            loss = l_mask + l_kpt
+            loss = l_mask + l_nll + l_inv * 0.1
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()

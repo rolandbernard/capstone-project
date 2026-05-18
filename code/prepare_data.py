@@ -12,13 +12,12 @@ cat_ids = coco.getCatIds(catNms=['person'])
 img_ids = coco.getImgIds(catIds=cat_ids)
 
 # Pick 10 images
-subset_img_ids = img_ids[:10]
+subset_img_ids = sorted(img_ids)[:10]
 imgs = coco.loadImgs(subset_img_ids)
 
 data_dir = 'code/data/coco_subset'
 os.makedirs(data_dir, exist_ok=True)
 os.makedirs(os.path.join(data_dir, 'images'), exist_ok=True)
-os.makedirs(os.path.join(data_dir, 'labels'), exist_ok=True)
 
 for img_info in imgs:
     # Download image
