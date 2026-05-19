@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
 
+import dataset
+
 # The set of links between keypoints that make up the skeleton in the COCO pose model.
 SKELETON = [
     [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11],
@@ -26,7 +28,7 @@ class Config:
     mainly only in the training phase.
     """
     # How much history to use for back-propagation through time.
-    seq_len: int = 8
+    seq_len: int = 20
     # Training parameters.
     max_epochs: int = 50
     batch_size: int = 32
@@ -35,6 +37,7 @@ class Config:
     lr_factor: float = 0.5
     min_lr: float = 1e-6
     patience: int = 6
+    frame_strides: list[int] = [1, 2, 3, 4, 5]
     # Model parameters.
     num_keypoint = 17
     depth: int = 3
@@ -278,15 +281,14 @@ def net_storage_in(cfg: Config, nets_dir: str | None, stat_dir: str | None, mode
     function will take the necessary parameters from the supplied configuration.
     """
     stopper = EarlyStopping(cfg.patience)
-    optimizer = optim.AdamW(
-        model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=cfg.lr_factor, patience=cfg.lr_patience, min_lr=cfg.min_lr)
     return NetStorage(nets_dir, stat_dir, stopper, model, optimizer, scheduler, compile)
 
 
 def train_epochs_in(
-    cfg: Config, nets_dir: str | None, stat_dir: str | None, model, subset=None, testing=False, callback=None
+    cfg: Config, nets_dir: str | None, stat_dir: str | None, model, testing=False, callback=None
 ):
     """
     Perform a multiple training epochs. This will initialize the net storage in
@@ -296,26 +298,16 @@ def train_epochs_in(
     """
     set_seed(42)
     nets = net_storage_in(cfg, nets_dir, stat_dir, model.to(cfg.device))
-    full_train = dataset.CloudCastWindowedDataset(
-        "./data/train", cfg.seq_len, cfg.pred_len)
+    full_train = dataset.TODO(
+        "./data/train", cfg.seq_len, cfg.frame_strides)  # TODO
     if testing:
         # This configuration is only for the sanity check, it is not used for the
         # actual training of the models.
         train = torch.utils.data.Subset(full_train, range(100))
         val = train
     else:
-        # To eliminate all possible information leakage, the gap is chosen to be the
-        # sum of the past and future frames loaded. This will have the effect that no
-        # single frame is shared between training and validation set.
-        train, val = dataset.train_val_split(
-            full_train, cfg.val_block_len, cfg.val_block_cnt, cfg.seq_len + cfg.pred_len)
-        if subset is not None:
-            sub_len = round(subset * len(train))
-            train, _ = torch.utils.data.random_split(
-                train, [sub_len, len(train) - sub_len])
-            sub_len = round(subset * len(val))
-            val, _ = torch.utils.data.random_split(
-                val, [sub_len, len(val) - sub_len])
+        # Select 1000 validation samples from the training set.
+        train, val = dataset.train_val_split(full_train, 1000)
     train_loader = DataLoader(
         train, cfg.batch_size, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
@@ -333,70 +325,13 @@ def count_model_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def reduce_logit(logits):
-    """
-    Reduce the target to use only 3 cloud types, from the 11 that are in the
-    full dataset.
-    """
-    probs = nn.functional.softmax(logits, dim=2)
-    mapping = torch.tensor(CLOUD_TYPE_MAPPING, device=logits.device)
-    mapping_mat = nn.functional.one_hot(mapping, 4).float()
-    return torch.log(torch.einsum('btihw, io -> btohw', probs, mapping_mat))
-
-
-def reduce_target(target):
-    """
-    Reduce the target to use only 3 cloud types, from the 11 that are in the
-    full dataset.
-    """
-    mapping = torch.tensor(CLOUD_TYPE_MAPPING, device=target.device)
-    return mapping[target]
-
-
-def compute_confusion_matrix(logits, targets, num_classes=11):
-    """
-    Compute the confusion matrix given logits and ground-truth targets.
-    """
-    # Select the maximum for each pixel. Third dimension is the classes.
-    pred = torch.argmax(logits, dim=2)
-    combined = targets * num_classes + pred
-    counts = torch.bincount(torch.flatten(combined), minlength=num_classes**2)
-    return counts.reshape(num_classes, num_classes)
-
-
-def autoregressive_forecast(ahead: int, expand: int, model, x, ts, ts_next):
-    _, T, _, _ = x.shape
-    ts = torch.concat([ts, ts_next], dim=1)
-    parts = []
-    for i in range(0, ahead + expand, ahead):
-        logits = model(x, ts[:, i:i+T], ts[:, i+T:i+T+ahead])
-        parts.append(logits)
-        x = torch.concat([x, torch.argmax(logits, dim=2)], dim=1)[:, -T:, :, :]
-    return torch.concat(parts, dim=1)
-
-
-def test_epoch(ahead: int, extend: int, model, loader):
+def test_epoch(model, loader):
     """
     Run a single evaluation round over the given loader. This differs from the
-    function `eval_epoch` in that it collects metrics also for the individual
-    prediction steps, not just the average over them. It also compute confusion
-    matrices and metrics using grouped classes.
+    function `eval_epoch` in that it collects more metrics.
     """
     model.eval()
-    metrics = {
-        "loss": 0.0, "acc": 0.0, "conf": torch.zeros(11, 11, device=model.device),
-        "rloss": 0.0, "racc": 0.0, "rconf": torch.zeros(4, 4, device=model.device),
-    }
-    for i in range(ahead + extend):
-        metrics[f"loss{i}"] = 0.0
-        metrics[f"acc{i}"] = 0.0
-        metrics[f"conf{i}"] = torch.zeros(11, 11, device=model.device)
-        metrics[f"rloss{i}"] = 0.0
-        metrics[f"racc{i}"] = 0.0
-        metrics[f"rconf{i}"] = torch.zeros(4, 4, device=model.device)
-    count = 0
-    criterion = nn.CrossEntropyLoss()
-    rcriterion = nn.NLLLoss()
+    # TODO
     # Disable gradients to save memory and compute.
     with torch.no_grad():
         for x, y, ts, ts_y in loader:
@@ -405,49 +340,24 @@ def test_epoch(ahead: int, extend: int, model, loader):
             ts = ts.to(model.device, non_blocking=True)
             ts_y = ts_y.to(model.device, non_blocking=True)
             with torch.autocast(model.device.type):
-                if extend > 0:
-                    logits = autoregressive_forecast(
-                        ahead, extend, model, x, ts, ts_y)
-                else:
-                    logits = model(x, ts, ts_y)
-                metrics["loss"] += compute_loss(logits, y, criterion).item()
-                metrics["acc"] += compute_accuracy(logits, y)
-                metrics["conf"] += compute_confusion_matrix(logits, y)
-                for i in range(ahead + extend):
-                    l, t = logits[:, i:i+1, :, :, :], y[:, i:i+1, :, :]
-                    metrics[f"loss{i}"] += compute_loss(l, t, criterion).item()
-                    metrics[f"acc{i}"] += compute_accuracy(l, t)
-                    metrics[f"conf{i}"] += compute_confusion_matrix(l, t)
-                rlogp = reduce_logit(logits)
-                ry = reduce_target(y)
-                metrics["rloss"] += compute_loss(rlogp, ry, rcriterion).item()
-                metrics["racc"] += compute_accuracy(rlogp, ry)
-                metrics["rconf"] += compute_confusion_matrix(rlogp, ry, 4)
-                for i in range(ahead + extend):
-                    l, t = rlogp[:, i:i+1, :, :, :], ry[:, i:i+1, :, :]
-                    metrics[f"rloss{i}"] += \
-                        compute_loss(l, t, rcriterion).item()
-                    metrics[f"racc{i}"] += compute_accuracy(l, t)
-                    metrics[f"rconf{i}"] += compute_confusion_matrix(l, t, 4)
+                # TODO
             count += 1
-    for k in metrics.keys():
-        if not k.startswith("conf") and not k.startswith("rconf"):
-            metrics[k] /= count
+    # TODO
     return metrics
 
 
-def test_epochs_in(cfg: Config, nets_dir: str, stat_dir: str, model, extend: int = 0):
+def test_epochs_in(cfg: Config, nets_dir: str, stat_dir: str, model):
     """
     Perform a run through the test set and return the metrics.
     """
     set_seed(42)
-    if not isinstance(model, CopyModel):
+    if not nets_dir is None:
         nets = net_storage_in(cfg, nets_dir, stat_dir, model.to(cfg.device))
         nets.load_best_checkpoint()
         model = nets.net
-    test = dataset.CloudCastWindowedDataset(
-        "./data/test", cfg.seq_len, cfg.pred_len + extend)
+    test = dataset.TODO(
+        "./data/test", cfg.seq_len, cfg.frame_strides)  # TODO
     loader = DataLoader(
         test, cfg.batch_size, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
-    return test_epoch(cfg.pred_len, extend, model, loader.W
+    return test_epoch(model, loader)
