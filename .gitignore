@@ -3,6 +3,9 @@
 !.gitignore
 /data
 /nets/*.net
+*.pt
+*.jpg
+*.png
 __pycache__
 
 # Build results
