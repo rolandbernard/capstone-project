@@ -7,6 +7,8 @@
 *.jpg
 *.png
 __pycache__
+venv
+!.env.example
 
 # Build results
 submission*
