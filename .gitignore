@@ -10,6 +10,8 @@ __pycache__
 
 # Build results
 submission*
+*.mp4
+*.avi
 
 ### Latex ###
 *.synctex.gz
