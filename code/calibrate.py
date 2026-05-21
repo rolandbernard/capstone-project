@@ -146,6 +146,15 @@ class Camera:
         z = torch.clamp(z, min=eps)
         return xy / z
 
+    def to(self, *args, **kargs):
+        """
+        Apply the PyTorch `.to` method to all contained tensors.
+        """
+        self.rotation = self.rotation.to(*args, **kargs)
+        self.translation = self.translation.to(*args, **kargs)
+        self.intrinsic = self.intrinsic.to(*args, **kargs)
+        self.distortion = self.distortion.to(*args, **kargs)
+
 
 def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
     """
@@ -153,13 +162,13 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor]) -> t
     to `triangulate`, but the points must have be undistorted beforehand.
     """
     *batch, _ = points[0].shape
-    vec = torch.cat([cam.translation for cam in cams])
-    mats = torch.zeros(*batch, len(cams)*3, 3 + len(cams))
+    mats = torch.zeros(*batch, len(cams)*2, 3, device=points[0].device)
+    vec = torch.zeros(*batch, len(cams)*2, 1, device=points[0].device)
     for i, (cam, pts) in enumerate(zip(cams, points)):
-        mats[..., 3*i:3*i + 3, 0:3] = -cam.rotation
-        mats[..., 3*i:3*i + 2, 3 + i] = pts
-        mats[..., 3*i + 2, 3 + i] = 1.0
-    return torch.linalg.lstsq(mats, vec).solution[..., 0:3]
+        r, t = cam.rotation, cam.translation
+        mats[..., 2*i:2*i + 2, :] = r[0:2] - pts.unsqueeze(-1) * r[2]
+        vec[..., 2*i:2*i + 2, 0] = pts * t[2] - t[0:2]
+    return torch.linalg.lstsq(mats, vec).solution.squeeze(-1)
 
 
 def triangulate(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
