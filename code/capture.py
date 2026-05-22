@@ -30,7 +30,7 @@ class VideoSource:
         """
         pass
 
-    def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], None | list[Camera]]:
+    def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], list[Camera]]:
         """
         This function must be implemented by all video input methods. It should
         return `None` if there are no new further frames available, and there
@@ -49,13 +49,13 @@ class OfflineVideoSource(VideoSource):
     must be the same or this source will fail to start.
     """
 
-    def __init__(self, streams: list[int | str], cameras: None | list[Camera] = None):
+    def __init__(self, streams: list[str], cameras: None | list[Camera] = None):
         """
         Create a new offline video source. A list of streams pointing to video
         files must be given together with associated camera parameters.
         """
         self.streams = streams
-        self.cameras = cameras
+        self.cameras = cameras or [Camera() for _ in streams]
 
     def start(self):
         self.caps = [cv2.VideoCapture(s) for s in self.streams]
@@ -70,7 +70,7 @@ class OfflineVideoSource(VideoSource):
         for cap in self.caps:
             cap.release()
 
-    def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], None | list[Camera]]:
+    def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], list[Camera]]:
         frames = []
         for cap in self.caps:
             if not cap.isOpened():
@@ -143,7 +143,7 @@ class OnlineVideoSource(VideoSource):
         together with associated camera parameters.
         """
         self.streams = [ThreadedVideoStream(s) for s in streams]
-        self.cameras = cameras
+        self.cameras = cameras or [Camera() for _ in streams]
 
     def start(self):
         for stream in self.streams:
@@ -153,7 +153,7 @@ class OnlineVideoSource(VideoSource):
         for stream in self.streams:
             stream.release()
 
-    def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], None | list[Camera]]:
+    def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], list[Camera]]:
         frames = []
         timestamps = []
         for cap in self.streams:
