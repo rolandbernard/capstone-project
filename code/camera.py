@@ -11,6 +11,12 @@ class Camera:
     A simple class to encapsulate all of the intrinsic and extrinsic camera
     calibration parameters necessary for mapping a 3d point into the camera
     perspective. Uses PyTorch tensors.
+
+    >>> cam = Camera()
+    >>> cam.rotation.shape
+    torch.Size([3, 3])
+    >>> cam.translation
+    tensor([0., 0., 0.])
     """
     # Extrinsics
     rotation: torch.Tensor = torch.eye(3)
@@ -25,6 +31,27 @@ class Camera:
         replace the values in this instance with those in the file. If some
         sections are missing in the file, those parameters will simply be left
         as is.
+        
+        >>> import tempfile, os
+        >>> ini_content = '''[Extrinsics]
+        ... R11 = 1.0\\nR12 = 0.0\\nR13 = 0.0
+        ... R21 = 0.0\\nR22 = 1.0\\nR23 = 0.0
+        ... R31 = 0.0\\nR32 = 0.0\\nR33 = 1.0
+        ... T1 = 1.0\\nT2 = 2.0\\nT3 = 3.0
+        ... [Intrinsics]
+        ... f = 500.0\\nmu = 1.0\\nmv = 1.0\\nu0 = 320.0\\nv0 = 240.0
+        ... [Distortion=pinhole]
+        ... k1 = 0.1\\nk2 = 0.02\\np1 = 0.001\\np2 = 0.002\\nk3 = 0.003
+        ... '''
+        >>> with tempfile.NamedTemporaryFile('w', delete=False) as f:
+        ...     temp_path, _ = f.name, f.write(ini_content)
+        >>> cam = Camera()
+        >>> cam.load_ini(temp_path)
+        >>> os.remove(temp_path)
+        >>> cam.translation
+        tensor([1., 2., 3.])
+        >>> cam.intrinsic[0, 2].item()
+        320.0
         """
         config = configparser.ConfigParser()
         with open(path, "r") as file:
@@ -59,6 +86,17 @@ class Camera:
         Save the calibration parameters to a file in a .ini format. Optionally it
         is possible to not save the extrinsic parameters. This is useful in cases
         where the stored extrinsics are not meaningful.
+
+        >>> import tempfile, os
+        >>> cam = Camera(translation=torch.tensor([5.0, -2.0, 0.5]))
+        >>> with tempfile.NamedTemporaryFile('w', delete=False) as f:
+        ...     temp_path = f.name
+        >>> cam.save_ini(temp_path)
+        >>> config = configparser.ConfigParser()
+        >>> _ = config.read(temp_path)
+        >>> os.remove(temp_path)
+        >>> config["Extrinsics"]["T2"]
+        '-2.0'
         """
         config = configparser.ConfigParser()
         if save_extrinsics:
@@ -89,6 +127,14 @@ class Camera:
         """
         Compute the distortions radial scale, as well as x and y tangential
         offsets for this cameras parameters.
+
+        >>> cam = Camera(distortion=torch.tensor([0.1, 0.05, 0.0, 0.0, 0.0]))
+        >>> xy_norm = torch.tensor([1.0, 1.0])
+        >>> scale, xy_off = cam.distortion_params(xy_norm)
+        >>> round(scale.item(), 5)
+        1.4
+        >>> xy_off.tolist()
+        [0.0, 0.0]
         """
         k1, k2, _, _, k3 = self.distortion
         p12 = self.distortion[2:4]
@@ -107,6 +153,11 @@ class Camera:
         Project a set of 3d points to 2d locations on the cameras image plane. The
         last dimensions of the input should be the points, and the others can be
         an arbitrarily number of batch dimensions.
+
+        >>> cam = Camera()
+        >>> pts = torch.tensor([1.0, 2.0, 2.0])
+        >>> cam.project(pts).tolist()
+        [0.5, 1.0]
         """
         # Project into camera space
         points_cam = (points @ self.rotation.T) + self.translation
@@ -125,6 +176,11 @@ class Camera:
         Undistort a set of 2d points on the cameras image plane from pixel space
         to normalized camera coordinates. The result space matches the output
         of the below `project_pinhole` method.
+
+        >>> cam = Camera()
+        >>> pts = torch.tensor([0.5, 1.0])
+        >>> cam.undistort_points(pts).tolist()
+        [0.5, 1.0]
         """
         xy = torch.linalg.solve(
             self.intrinsic[0:2, 0:2], points - self.intrinsic[0:2, 2]
@@ -140,6 +196,11 @@ class Camera:
         Project a set of 3d points to 2d locations on the cameras image plane.
         This computes normalized camera coordinates and does not take into acount
         camera intrinsics or distortion.
+
+        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, 1.0]))
+        >>> pts = torch.tensor([1.0, 1.0, 1.0])
+        >>> cam.project_pinhole(pts).tolist()
+        [0.5, 0.5]
         """
         points_cam = (points @ self.rotation.T) + self.translation
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
@@ -149,6 +210,11 @@ class Camera:
     def to(self, *args, **kargs):
         """
         Apply the PyTorch `.to` method to all contained tensors.
+
+        >>> cam = Camera()
+        >>> _ = cam.to(torch.float64)
+        >>> cam.rotation.dtype
+        torch.float64
         """
         self.rotation = self.rotation.to(*args, **kargs)
         self.translation = self.translation.to(*args, **kargs)
@@ -160,15 +226,25 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor]) -> t
     """
     Triangulate multiple points using multiple camera views. This is similar
     to `triangulate`, but the points must have be undistorted beforehand.
+
+    >>> cam1 = Camera(translation=torch.tensor([0.9, 0.0, 0.0]))
+    >>> cam2 = Camera(translation=torch.tensor([-1.1, 0.0, 0.0]))
+    >>> p1 = torch.tensor([1.0, 0.1])
+    >>> p2 = torch.tensor([-1.0, 0.1])
+    >>> res = triangulate_undistorted([cam1, cam2], [p1, p2])
+    >>> res.shape
+    torch.Size([3])
+    >>> [round(x, 2) for x in res.tolist()]
+    [0.1, 0.1, 1.0]
     """
-    *batch, _ = points[0].shape
-    mats = torch.zeros(*batch, len(cams)*2, 3, device=points[0].device)
-    vec = torch.zeros(*batch, len(cams)*2, 1, device=points[0].device)
-    for i, (cam, pts) in enumerate(zip(cams, points)):
+    mats = []
+    vec = []
+    for cam, pts in zip(cams, points):
         r, t = cam.rotation, cam.translation
-        mats[..., 2*i:2*i + 2, :] = r[0:2] - pts.unsqueeze(-1) * r[2]
-        vec[..., 2*i:2*i + 2, 0] = pts * t[2] - t[0:2]
-    return torch.linalg.lstsq(mats, vec).solution.squeeze(-1)
+        mats.append(r[0:2] - pts.unsqueeze(-1) * r[2])
+        vec.append((pts * t[2] - t[0:2]).unsqueeze(-1))
+    lstsq = torch.linalg.lstsq(torch.cat(mats, dim=-2), torch.cat(vec, dim=-2))
+    return lstsq.solution.squeeze(-1)
 
 
 def triangulate(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
@@ -177,6 +253,14 @@ def triangulate(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
     must have the same shape, with the last dimension having size 2 and an arbitrary
     number of batch dimensions in front. The output will have the same batch
     dimensions but a final dimension of size 3.
+
+    >>> cam1 = Camera(translation=torch.tensor([1.1, 0.0, 0.0]))
+    >>> cam2 = Camera(translation=torch.tensor([-0.9, 0.0, 0.0]))
+    >>> p1 = torch.tensor([1.0, -0.1])
+    >>> p2 = torch.tensor([-1.0, -0.1])
+    >>> res = triangulate([cam1, cam2], [p1, p2])
+    >>> [round(x, 2) for x in res.tolist()]
+    [-0.1, -0.1, 1.0]
     """
     xy = [cam.undistort_points(pts) for cam, pts in zip(cams, points)]
     return triangulate_undistorted(cams, xy)
