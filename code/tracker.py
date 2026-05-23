@@ -4,6 +4,7 @@ import torch
 from camera import Camera
 from detect import PoseDetector
 
+
 class Track:
     """
     An abstract class to represent a track of a single object in the tracking system.
@@ -100,6 +101,7 @@ class Simple2dTracker(Tracker):
 
     def __init__(self, detector: PoseDetector, min_age: int = 3, max_inv: int = 30):
         super().__init__()
+        self.detector = detector
         self.min_age = min_age
         self.max_inv = max_inv
 
@@ -108,4 +110,12 @@ class Simple2dTracker(Tracker):
         return [track for track in self.tracks if track.num_detection > self.min_age]
 
     def predict_and_update(self, ts: float, cams: list[Camera], imgs: list[torch.Tensor]):
-        # No prediction.
+        # No prediction. Only works with single images.
+        assert len(imgs) == 1
+        prediction = torch.stack([track.state.view(-1, 3)
+                                 for track in self.tracks])
+        detections = self.detector.detect(imgs)[0]
+        cost_mat = prediction[:, None, :, 0:2] - detections[None, :, :, 0:2]
+        cost_mat = cost_mat*cost_mat
+        visible = prediction[:, None, :, 2:3] * detections[None, :, :, 2:3]
+        cost_mat = (cost_mat * visible).sum(dim=(2, 3)) / visible.sum(dim=-1)

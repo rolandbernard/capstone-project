@@ -18,6 +18,7 @@ class PoseDetector:
         model.compile()
         self.model = model
         self.threshold = threshold
+        self.num_keypoint = 17
 
     def detect(self, images: torch.Tensor | list[torch.Tensor]) -> list[torch.Tensor]:
         """
@@ -35,7 +36,7 @@ class PoseDetector:
             results = []
             for img_res in pred:
                 valid = img_res[img_res[:, 4] > self.threshold, 6:]
-                results.append(valid.view(-1, 17, 3))
+                results.append(valid.view(-1, self.num_keypoint, 3))
             return results
 
     def to(self, *args, **kargs):
