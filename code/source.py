@@ -121,6 +121,10 @@ class ThreadedVideoStream:
         self.cap.release()
 
     def next_frame(self) -> tuple[None, None] | tuple[float, cv2.typing.MatLike]:
+        """
+        Return the most recently abutted from from this video stream together
+        with the associated timestamp in seconds.
+        """
         if not self.running:
             return None, None
         with self.lock:

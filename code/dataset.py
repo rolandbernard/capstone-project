@@ -3,7 +3,7 @@ import os
 
 import gdown
 
-import capture
+import source
 from camera import Camera
 
 
@@ -41,7 +41,7 @@ class SalsaDataset:
             gdown.cached_download(  # type: ignore
                 id=id, path=f"{self.path}/CocktailParty/cam{i}.avi")
 
-    def get_source(self, name: str = "PosterSession") -> capture.VideoSource:
+    def get_source(self, name: str = "PosterSession") -> source.VideoSource:
         """
         Load one of the two video sequences from the dataset into a video source
         for further processing. The name can be wither "PosterSession" (default)
@@ -53,4 +53,4 @@ class SalsaDataset:
             camera = Camera()
             camera.load_ini(f"{self.path}/cam{i}.ini")
             cameras.append(camera)
-        return capture.OfflineVideoSource(streams, cameras)
+        return source.OfflineVideoSource(streams, cameras)

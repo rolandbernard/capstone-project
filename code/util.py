@@ -6,6 +6,9 @@ import torch
 import numpy as np
 import pandas as pd
 
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
 # The set of links between keypoints that make up the skeleton in the COCO pose model.
 SKELETON = [
     [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11],
@@ -25,34 +28,13 @@ def set_seed(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
-class EarlyStopping:
-    """
-    This is a very small class encapsulating the early stopping logic. The `step`
-    method takes the current metric, and returns either `True` if we should stop
-    or `False` if the training should continue. Note that for the metric smaller
-    should be considered better, i.e., it should be a loss, not an accuracy.
-    """
-
-    def __init__(self, patience: int, init: float | None = None):
-        self.patience = patience
-        self.best = init
-        self.counter = 0
-
-    def step(self, metric: float):
-        if self.best is None or metric < self.best:
-            self.best = metric
-            self.counter = 0
-        else:
-            self.counter += 1
-        return self.counter >= self.patience
-
-
 class NetStorage:
     """
     This class provides some utility methods for recoding training history, as
     well as saving and restoring model weights. This should allow stopping and
     resuming the training process after any epoch.
     """
+
     @classmethod
     def training_stats(cls, stats_dir: str) -> pd.DataFrame:
         return pd.DataFrame([
@@ -60,13 +42,11 @@ class NetStorage:
         ])
 
     def __init__(
-        self, nets_dir: str | None, stat_dir: str | None, stopper: EarlyStopping | None,
-        net, optimizer, scheduler, compile=True
+        self, nets_dir: str | None, stat_dir: str | None, net, optimizer, scheduler, compile=True
     ):
         self.nets_dir = nets_dir
         self.stat_dir = stat_dir
         self.step = -1
-        self.stopper = stopper
         self.net = net
         if compile:
             self.net.compile()
@@ -74,7 +54,7 @@ class NetStorage:
         self.scheduler = scheduler
         self.load_checkpoint()
 
-    def save_network(self, step: int, metrics: dict, stopper: EarlyStopping | None, net, optimizer, scheduler):
+    def save_network(self, step: int, metrics: dict, net, optimizer, scheduler):
         if self.nets_dir is not None:
             torch.save(net.state_dict(), f"{self.nets_dir}/{step}.net")
             torch.save(optimizer.state_dict(), f"{self.nets_dir}/{step}.optim")
@@ -83,12 +63,9 @@ class NetStorage:
             torch.save({
                 "step": step,
                 **metrics,
-                "stopper_best": stopper.best if stopper is not None else None,
-                "stopper_counter": stopper.counter if stopper is not None else None,
             }, f"{self.stat_dir}/{step}.stat")
         # Update the instance variable to reflect the new checkpoint.
         self.step = step
-        self.stopper = stopper
         self.net = net
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -112,12 +89,7 @@ class NetStorage:
                        for n in os.listdir(self.stat_dir)), default=-1)
         # Load if the step exists, otherwise this is a fresh run.
         if step != -1 and os.path.isfile(f"{self.stat_dir}/{step}.stat"):
-            stats = torch.load(f"{self.stat_dir}/{step}.stat")
             self.step = step
-            if self.stopper is not None and stats["stopper_best"] is not None:
-                self.stopper.best = stats["stopper_best"]
-            if self.stopper is not None and stats["stopper_counter"] is not None:
-                self.stopper.counter = stats["stopper_counter"]
             model = torch.load(
                 f"{self.nets_dir}/{step}.net", map_location=self.net.device
             )

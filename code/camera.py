@@ -220,6 +220,7 @@ class Camera:
         self.translation = self.translation.to(*args, **kargs)
         self.intrinsic = self.intrinsic.to(*args, **kargs)
         self.distortion = self.distortion.to(*args, **kargs)
+        return self
 
 
 def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
