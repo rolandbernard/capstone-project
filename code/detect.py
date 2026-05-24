@@ -47,7 +47,7 @@ class PoseDetector:
             results = []
             for img_res in pred:
                 valid = img_res[(img_res[:, 4] > self.threshold) &
-                                ((img_res[:, 8::3] > self.threshold).sum() > self.min_keypoint)]
+                                ((img_res[:, 8::3] > self.threshold).sum() >= self.min_keypoint)]
                 valid_points = valid[:, 6:].view(-1, self.num_keypoint, 3)
                 bb_size = torch.linalg.vector_norm(
                     valid[:, 2:4] - valid[:, 0:2], dim=1, keepdim=True)
@@ -56,8 +56,8 @@ class PoseDetector:
                 var = bb_size * bb_size * \
                     (self.var_vis / (vis + self.var_vis / self.var_inv))
                 results.append((
-                    valid_points[:, :, 0:2].reshape(-1, self.num_keypoint*2),
-                    torch.kron(torch.diag_embed(var),
+                    valid_points[:, :, 0:2],
+                    torch.kron(var.unsqueeze(-1).unsqueeze(-1),
                                torch.eye(2, device=var.device))
                 ))
             return results

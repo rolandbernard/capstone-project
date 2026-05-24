@@ -31,7 +31,7 @@ class Camera:
         replace the values in this instance with those in the file. If some
         sections are missing in the file, those parameters will simply be left
         as is.
-        
+
         >>> import tempfile, os
         >>> ini_content = '''[Extrinsics]
         ... R11 = 1.0\\nR12 = 0.0\\nR13 = 0.0
@@ -121,7 +121,7 @@ class Camera:
             for i, n in enumerate(["k1", "k2", "p1", "p2", "k3"])
         }
         with open(path, "w") as file:
-          config.write(file)
+            config.write(file)
 
     def project_pinhole(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
         """
@@ -193,21 +193,25 @@ class Camera:
         """
         Undistort a set of 2d points on the cameras image plane from pixel space
         to normalized camera coordinates. The result space matches the output
-        of the below `project_pinhole` method.
+        of the below `project_pinhole` method. Input pixels should have shape
+        of (..., N*2).
 
         >>> cam = Camera()
-        >>> pts = torch.tensor([0.5, 1.0])
+        >>> pts = torch.tensor([[0.5, 1.0], [0.75, 15.0]])
         >>> cam.undistort_points(pts).tolist()
-        [0.5, 1.0]
+        [[0.5, 1.0], [0.75, 15.0]]
         """
+        *Bs, M = points.shape
         xy = torch.linalg.solve(
-            self.intrinsic[0:2, 0:2], points - self.intrinsic[0:2, 2]
-        )
+            self.intrinsic[0:2, 0:2],
+            (points.view(*Bs, M // 2, 2) -
+             self.intrinsic[0:2, 2]).unsqueeze(-1)
+        ).squeeze(-1)
         xy_norm = xy.clone()
         for _ in range(num_iters):
             scale, xy_off = self.distortion_params(xy_norm)
             xy_norm = (xy - xy_off) / scale
-        return xy_norm
+        return xy_norm.view(*Bs, M)
 
     def undistort_covars(self, covars: torch.Tensor) -> torch.Tensor:
         """
@@ -218,10 +222,19 @@ class Camera:
         remove the camera distortion non-linearity from the observation step.
         Shape of `covars` is expected to be (..., N*2, N*2) for N points. The
         batch dimensions are assumed to be independent.
+
+        >>> cam = Camera()
+        >>> pts = torch.tensor([[[0.5, 1.0], [1.0, 0.5]], [[1.0, 0.0], [0.0, 2.0]]])
+        >>> cam.undistort_covars(pts).tolist()
+        [[[0.5, 1.0], [1.0, 0.5]], [[1.0, 0.0], [0.0, 2.0]]]
+        >>> pts = torch.tensor([[[0.5, 1.0], [1.0, 0.5]]])
+        >>> cam.undistort_covars(pts).tolist()
+        [[[0.5, 1.0], [1.0, 0.5]]]
         """
         *_, M = covars.shape
-        intr = torch.kron(torch.eye(M // 2), self.intrinsic[0:2, 0:2])
-        covars = torch.linalg.solve(intr, covars.T).T
+        intr = torch.kron(
+            torch.eye(M // 2, device=covars.device), self.intrinsic[0:2, 0:2])
+        covars = torch.linalg.solve(intr, covars.mT).mT
         covars = torch.linalg.solve(intr, covars)
         return covars
 
@@ -241,7 +254,16 @@ class Camera:
         return self
 
 
-def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
+def inv_sqrt_sym(matrix: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """
+    Compute the inverse square-root of the given batch of matrices.
+    """
+    diag, vecs = torch.linalg.eigh(matrix)
+    inv_sqrt = 1.0 / (torch.sqrt(diag) + eps)
+    return vecs @ torch.diag_embed(inv_sqrt) @ vecs.mT
+
+
+def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], covars: None | list[torch.Tensor] = None) -> torch.Tensor:
     """
     Triangulate multiple points using multiple camera views. This is similar
     to `triangulate`, but the points must have be undistorted beforehand.
@@ -255,13 +277,25 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor]) -> t
     torch.Size([3])
     >>> [round(x, 2) for x in res.tolist()]
     [0.1, 0.1, 1.0]
+    >>> p1 = torch.tensor([1.0, 0.1, 1.0, -0.1])
+    >>> p2 = torch.tensor([-1.0, 0.1, -1.0, -0.1])
+    >>> res = triangulate_undistorted([cam1, cam2], [p1, p2])
+    >>> [round(x, 2) for x in res.tolist()]
+    [0.1, 0.1, 1.0]
     """
     mats = []
     vec = []
-    for cam, pts in zip(cams, points):
+    for cam, pts, cov in zip(cams, points, covars or [None for _ in range(len(cams))]):
         r, t = cam.rotation, cam.translation
-        mats.append(r[0:2] - pts.unsqueeze(-1) * r[2])
-        vec.append((pts * t[2] - t[0:2]).unsqueeze(-1))
+        A = r[0:2] - pts.unsqueeze(-1) * r[2]
+        b = (pts * t[2] - t[0:2]).unsqueeze(-1)
+        if cov is None:
+            mats.append(A)
+            vec.append(b)
+        else:
+            inv_sqrt_cov = inv_sqrt_sym(cov)
+            mats.append(inv_sqrt_cov @ A)
+            vec.append(inv_sqrt_cov @ b)
     lstsq = torch.linalg.lstsq(torch.cat(mats, dim=-2), torch.cat(vec, dim=-2))
     return lstsq.solution.squeeze(-1)
 
