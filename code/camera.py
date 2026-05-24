@@ -123,6 +123,22 @@ class Camera:
         with open(path, "w") as file:
           config.write(file)
 
+    def project_pinhole(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
+        """
+        Project a set of 3d points to 2d locations on the cameras image plane.
+        This computes normalized camera coordinates and does not take into acount
+        camera intrinsics or distortion.
+
+        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, 1.0]))
+        >>> pts = torch.tensor([1.0, 1.0, 1.0])
+        >>> cam.project_pinhole(pts).tolist()
+        [0.5, 0.5]
+        """
+        points_cam = (points @ self.rotation.T) + self.translation
+        xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
+        z = torch.clamp(z, min=eps)
+        return xy / z
+
     def distortion_params(self, xy_norm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the distortions radial scale, as well as x and y tangential
@@ -148,6 +164,18 @@ class Camera:
             torch.flip(p12, [0]) * (r2 + 2.0 * xy_norm_sqr)
         return scale, xy_off
 
+    def distort_points(self, points: torch.Tensor) -> torch.Tensor:
+        """
+        Distort the given points in normalized camera coordinates so that they
+        represent pixel coordinates on the camera.
+        """
+        # Apply Tsai distortion
+        scale, xy_off = self.distortion_params(points)
+        xy_dist = points * scale + xy_off
+        # Apply camera intrinsics
+        uv = (xy_dist @ self.intrinsic[0:2, 0:2].T) + self.intrinsic[0:2, 2]
+        return uv
+
     def project(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane. The
@@ -159,17 +187,7 @@ class Camera:
         >>> cam.project(pts).tolist()
         [0.5, 1.0]
         """
-        # Project into camera space
-        points_cam = (points @ self.rotation.T) + self.translation
-        xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
-        # Apply Tsai distortion
-        z = torch.clamp(z, min=eps)
-        xy_norm = xy / z
-        scale, xy_off = self.distortion_params(xy_norm)
-        xy_dist = xy_norm * scale + xy_off
-        # Apply camera intrinsics
-        uv = (xy_dist @ self.intrinsic[0:2, 0:2].T) + self.intrinsic[0:2, 2]
-        return uv
+        return self.distort_points(self.project_pinhole(points, eps))
 
     def undistort_points(self, points: torch.Tensor, num_iters: int = 5) -> torch.Tensor:
         """
@@ -191,21 +209,21 @@ class Camera:
             xy_norm = (xy - xy_off) / scale
         return xy_norm
 
-    def project_pinhole(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
+    def undistort_covars(self, covars: torch.Tensor) -> torch.Tensor:
         """
-        Project a set of 3d points to 2d locations on the cameras image plane.
-        This computes normalized camera coordinates and does not take into acount
-        camera intrinsics or distortion.
-
-        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, 1.0]))
-        >>> pts = torch.tensor([1.0, 1.0, 1.0])
-        >>> cam.project_pinhole(pts).tolist()
-        [0.5, 0.5]
+        Approximately undistort a covariance matrix. This is useful for cases
+        where we know covariances in pixel space, put we want to convert the
+        values, and therefore also the covariances to normalized camera coordinates.
+        This is useful for example in an extended Kalman filter, if we want to
+        remove the camera distortion non-linearity from the observation step.
+        Shape of `covars` is expected to be (..., N*2, N*2) for N points. The
+        batch dimensions are assumed to be independent.
         """
-        points_cam = (points @ self.rotation.T) + self.translation
-        xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
-        z = torch.clamp(z, min=eps)
-        return xy / z
+        *_, M = covars.shape
+        intr = torch.kron(torch.eye(M // 2), self.intrinsic[0:2, 0:2])
+        covars = torch.linalg.solve(intr, covars.T).T
+        covars = torch.linalg.solve(intr, covars)
+        return covars
 
     def to(self, *args, **kargs):
         """
