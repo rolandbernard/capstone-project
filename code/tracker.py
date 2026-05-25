@@ -7,20 +7,39 @@ from detect import PoseDetector
 
 class Track:
     """
-    An abstract class to represent a track of a single object in the tracking system.
+    This is a simple implementation of the track in which the state is made up
+    of a vector in which the first elements form the coordinates of keypoints and
+    a matrix corresponding to the complete covariance matrix. This  type of track
+    does not include history.
     """
 
-    def __init__(self, init_state):
+    def __init__(self, id: int, init_mean: torch.Tensor, init_cov: torch.Tensor, num_keypoint=17, num_dim=3):
+        self.id = id
         self.last_detection = 0
         self.num_detection = 0
-        self.state = init_state
+        self.num_keypoint = num_keypoint
+        self.num_dim = num_dim
+        self.update(init_mean, init_cov)
+
+    def update(self, mean: torch.Tensor, cov: torch.Tensor):
+        self.mean = mean
+        self.cov = cov
 
     def get_keypoints(self) -> torch.Tensor:
         """
         Get the keypoints for this track. The keypoints should be derived from
         the internal state of the track in some implementation defined way.
         """
-        raise NotImplementedError
+        return self.mean.view(-1, self.num_dim)[:self.num_keypoint]
+
+    def get_full_covariances(self) -> torch.Tensor:
+        """
+        Get a full covariance matrix for this track, including covariances between
+        different keypoints. This is used internally, but for visualization we
+        use `get_covariances`.
+        """
+        tot = self.num_keypoint*self.num_dim
+        return self.cov[:tot, :tot].view(-1, self.num_dim, self.num_keypoint, self.num_dim)
 
     def get_covariances(self) -> torch.Tensor:
         """
@@ -28,33 +47,27 @@ class Track:
         marginalized for each keypoint even if there are inter-keypoint variances.
         May return a small diagonal matrix if not implemented.
         """
-        K, D = self.get_keypoints().shape
-        return torch.eye(D).expand(K, D, D)
+        blocks = torch.diagonal(self.get_full_covariances(), dim1=0, dim2=2)
+        return blocks.permute(2, 0, 1)
 
 
 class Tracker:
     """
-    Abstract class for implementing the main logic of the tracking system. The
-    tracker is given as input timestamps, images, and camera locations. From
-    these it tries to reconstruct the individual objects positions in each frame.
+    A simple tracker that only tracks objects in individual 2d images. Detections
+    are matched to tracks using the hungarian algorithm. Tracks become active if
+    they are observed a sufficient number of times, and removed once they are not
+    observed for some time.
     """
 
     def __init__(self):
         self.tracks: list[Track] = []
         self.last_ts = 0
+        self.last_id = 0
 
     def get_prediction(self, ts: None | float = None) -> list[Track]:
         """
         Get the internal state prediction for the given time in the future. By
         default, if no time step is given, the current prediction is returned.
-        """
-        raise NotImplementedError
-
-    def predict_and_update(self, ts: float, cams: list[Camera], imgs: list[torch.Tensor]):
-        """
-        This is a combination of the internal prediction and update using new
-        images from the given cameras. The internal state is advanced to `ts`
-        seconds and then updated using the new information in the images.
         """
         raise NotImplementedError
 
@@ -64,31 +77,14 @@ class Tracker:
         the internal state of all tracks accordingly, but without using any new
         external information.
         """
-        return self.predict_and_update(ts, [], [])
+        pass
 
     def update(self, cams: list[Camera], imgs: list[torch.Tensor]):
         """
         Update the internal track states based on new incoming images, but don't
         perform any internal time step updates.
         """
-        return self.predict_and_update(self.last_ts, cams, imgs)
-
-
-class SimpleTrack(Track):
-    """
-    This is a simple implementation of the track in which the state is a single
-    vector in which the first elements form the coordinates of keypoints. This 
-    type of track does not have covariances.
-    """
-
-    def __init__(self, init_state: torch.Tensor, num_keypoint: int = 17, num_dim: int = 3):
-        super().__init__(init_state)
-        self.num_keypoint = num_keypoint
-        self.num_dim = num_dim
-
-    def get_keypoints(self) -> torch.Tensor:
-        return self.state[:self.num_keypoint * self.num_dim] \
-            .view(self.num_keypoint, self.num_dim)
+        pass
 
 
 class Simple2dTracker(Tracker):
