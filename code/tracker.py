@@ -15,15 +15,25 @@ class Track:
 
     def __init__(self, id: int, init_mean: torch.Tensor, init_cov: torch.Tensor, num_keypoint=17, num_dim=3):
         self.id = id
-        self.last_detection = 0
         self.num_detection = 0
         self.num_keypoint = num_keypoint
         self.num_dim = num_dim
         self.update(init_mean, init_cov)
 
     def update(self, mean: torch.Tensor, cov: torch.Tensor):
+        """
+        Update the track to the new state.
+        """
         self.mean = mean
         self.cov = cov
+        self.last_detection = 0
+        self.num_detection += 1
+
+    def no_update(self):
+        """
+        Record that there was no update for this track for one update cycle.
+        """
+        self.last_detection += 1
 
     def get_keypoints(self) -> torch.Tensor:
         """

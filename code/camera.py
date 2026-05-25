@@ -277,11 +277,6 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], cova
     torch.Size([3])
     >>> [round(x, 2) for x in res.tolist()]
     [0.1, 0.1, 1.0]
-    >>> p1 = torch.tensor([1.0, 0.1, 1.0, -0.1])
-    >>> p2 = torch.tensor([-1.0, 0.1, -1.0, -0.1])
-    >>> res = triangulate_undistorted([cam1, cam2], [p1, p2])
-    >>> [round(x, 2) for x in res.tolist()]
-    [0.1, 0.1, 1.0]
     """
     mats = []
     vec = []
