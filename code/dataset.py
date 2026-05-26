@@ -234,7 +234,7 @@ class CmuPanopticDataset:
                 download_file(f"{self.path}/{name}/{filename}",
                               f"{self.endpoint}/{name}/videos/vga_shared_crf10/{filename}")
 
-    def download(self, num_hd_cams: int = 4, num_vga_cams: int = 0):
+    def download(self, num_hd_cams: int = 0, num_vga_cams: int = 4):
         """
         Download the dataset from official source. Download is skipped if already present.
         """
