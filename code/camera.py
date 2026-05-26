@@ -134,7 +134,8 @@ class Camera:
         >>> cam.project_pinhole(pts).tolist()
         [0.5, 0.5]
         """
-        points_cam = (points @ self.rotation.T) + self.translation
+        points_cam = (self.rotation @ points.unsqueeze(-1)).squeeze(-1) \
+            + self.translation
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
         z = torch.clamp(z, min=eps)
         return xy / z
@@ -173,7 +174,8 @@ class Camera:
         scale, xy_off = self.distortion_params(points)
         xy_dist = points * scale + xy_off
         # Apply camera intrinsics
-        uv = (xy_dist @ self.intrinsic[0:2, 0:2].T) + self.intrinsic[0:2, 2]
+        uv = (self.intrinsic[0:2, 0:2] @ xy_dist.unsqueeze(-1)).squeeze(-1) \
+            + self.intrinsic[0:2, 2]
         return uv
 
     def project(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:

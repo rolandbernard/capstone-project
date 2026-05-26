@@ -15,28 +15,37 @@ def download_file(filename: str, data_url: str):
     """
     Download a file from the given url and put it into the given filename.
     """
-    with urllib.request.urlopen(data_url) as req_stream:
-        data = req_stream.read()
-        with open(filename, "wb") as file:
-            file.write(data)
+    try:
+        with urllib.request.urlopen(data_url) as req_stream:
+            data = req_stream.read()
+            with open(filename, "wb") as file:
+                file.write(data)
+    except:
+        print(f"warning: skipped {data_url}")
 
 
 def download_zip(folder: str, data_url: str):
     """
     Download a zip archive from the given url and extract it into the given folder.
     """
-    with urllib.request.urlopen(data_url) as req_stream:
-        with zipfile.ZipFile(io.BytesIO(req_stream.read())) as zip_file:
-            zip_file.extractall(folder)
+    try:
+        with urllib.request.urlopen(data_url) as req_stream:
+            with zipfile.ZipFile(io.BytesIO(req_stream.read())) as zip_file:
+                zip_file.extractall(folder)
+    except:
+        print(f"warning: skipped {data_url}")
 
 
 def download_tar(folder: str, data_url: str):
     """
     Download a tar archive from the given url and extract it into the given folder.
     """
-    with urllib.request.urlopen(data_url) as req_stream:
-        with tarfile.open(fileobj=io.BytesIO(req_stream.read()), mode="r:*") as zip_file:
-            zip_file.extractall(folder)
+    try:
+        with urllib.request.urlopen(data_url) as req_stream:
+            with tarfile.open(fileobj=io.BytesIO(req_stream.read()), mode="r:*") as zip_file:
+                zip_file.extractall(folder)
+    except:
+        print(f"warning: skipped {data_url}")
 
 
 class SalsaDataset:
