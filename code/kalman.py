@@ -2,10 +2,9 @@
 from functools import lru_cache
 
 import torch
-import torch.nn as nn
 
 
-class KalmanFilter(nn.Module):
+class KalmanFilter:
     """
     This class implements a linear Kalman filter. The dynamics must be specified
     in continuous form, with the discretization computed and cached on demand.
@@ -14,22 +13,15 @@ class KalmanFilter(nn.Module):
 
     def __init__(self, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
         super().__init__()
-        self.dyn_mat = nn.Parameter(dyn_mat)
-        self.dyn_cov = nn.Parameter(dyn_cov)
+        self.dyn_mat = dyn_mat
+        self.dyn_cov = dyn_cov
         self.get_dyn = lru_cache()(self._get_dyn)
 
     def _get_dyn(self, dt: float) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Create a new dynamics and covariance matrix for the given timestamp.
         """
-        # Use a second order approximation for now.
-        N, N = self.dyn_mat.shape
-        dyn_mat = torch.eye(N, device=self.dyn_mat.device) + self.dyn_mat * dt \
-            + self.dyn_mat @ self.dyn_mat * (dt * dt * 0.5)
-        dyn_cov = self.dyn_cov * dt + \
-            (self.dyn_mat @ self.dyn_cov
-             + self.dyn_cov @ self.dyn_mat.mT) * (dt * dt * 0.5)
-        return dyn_mat, dyn_cov
+        return discretize(dt, self.dyn_mat, self.dyn_cov)
 
     def predict(self, dt: float, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -37,11 +29,7 @@ class KalmanFilter(nn.Module):
         amount of time having passed and return the new means and covariances for
         the targets.
         """
-        if self.training:
-            # Don't cache the result if we are in training mode.
-            dyn_mat, dyn_cov = self._get_dyn(dt)
-        else:
-            dyn_mat, dyn_cov = self.get_dyn(dt)
+        dyn_mat, dyn_cov = self.get_dyn(dt)
         return kalman_predict(mean, cov, dyn_mat, dyn_cov)
 
     def update(
@@ -54,6 +42,19 @@ class KalmanFilter(nn.Module):
         steps.
         """
         return kalman_update(mean, cov, obs_mat, obs_mean, obs_cov)
+
+
+def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
+    """
+    Discretize the given continuous-time matrices using the given time.
+    """
+    # Use a second order approximation for now.
+    N, N = dyn_mat.shape
+    dyn_mat = torch.eye(N, device=dyn_mat.device) + dyn_mat * dt \
+        + dyn_mat @ dyn_mat * (dt * dt * 0.5)
+    dyn_cov = dyn_cov * dt \
+        + (dyn_mat @ dyn_cov + dyn_cov @ dyn_mat.mT) * (dt * dt * 0.5)
+    return dyn_mat, dyn_cov
 
 
 single_batch_block_diag = torch.vmap(torch.block_diag)
