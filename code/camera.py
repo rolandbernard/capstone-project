@@ -69,8 +69,8 @@ class Camera:
             section = config["Intrinsics"]
             f = float(section["f"])
             self.intrinsic = torch.tensor([
-                [f * float(section["mu"]), 0.0, float(section["u0"])],
-                [0.0, f * float(section["mv"]), float(section["v0"])],
+                [-f * float(section["mu"]), 0.0, float(section["u0"])],
+                [0.0, -f * float(section["mv"]), float(section["v0"])],
                 [0.0, 0.0, 1.0],
             ])
         if config.has_section("Distortion=pinhole"):
@@ -110,7 +110,7 @@ class Camera:
                     self.translation[row].item())
         f = self.intrinsic[0, 0].item()
         config["Intrinsics"] = {
-            "f": str(f),
+            "f": str(-f),
             "mu": str(1.0),
             "mv": str(self.intrinsic[1, 1].item() / f),
             "u0": str(self.intrinsic[0, 2].item()),
@@ -129,13 +129,13 @@ class Camera:
         This computes normalized camera coordinates and does not take into acount
         camera intrinsics or distortion.
 
-        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, 1.0]))
+        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, -1.0]))
         >>> pts = torch.tensor([1.0, 1.0, 1.0])
         >>> cam.project_pinhole(pts).tolist()
         [0.5, 0.5]
         """
-        points_cam = (self.rotation @ points.unsqueeze(-1)).squeeze(-1) \
-            + self.translation
+        points_cam = (self.rotation @ (points - self.translation).unsqueeze(-1)) \
+            .squeeze(-1)
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
         z = torch.clamp(z, min=eps)
         return xy / z
