@@ -32,7 +32,7 @@ class LinearPhysics:
         the targets.
         """
         dyn_mat, dyn_cov = self.get_dyn(dt)
-        return kalman_predict(mean, cov, dyn_mat, dyn_cov)
+        return predict(mean, cov, dyn_mat, dyn_cov)
 
 
 def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
@@ -60,7 +60,7 @@ def batched_block_diag(mats: list[torch.Tensor]) -> torch.Tensor:
     return batched.view(*Bs, N, N)
 
 
-def kalman_merge_obs(
+def merge_obs(
     obs_mat: list[torch.Tensor], obs_mean: list[torch.Tensor], obs_cov: list[torch.Tensor]
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
@@ -74,7 +74,7 @@ def kalman_merge_obs(
     return comb_mat, comb_mean, comb_cov
 
 
-def ekalman_merge_obs(
+def emerge_obs(
     obs: list[Callable[[torch.Tensor], torch.Tensor]], obs_mean: list[torch.Tensor], obs_cov: list[torch.Tensor]
 ) -> tuple[Callable[[torch.Tensor], torch.Tensor], torch.Tensor, torch.Tensor]:
     """
@@ -88,7 +88,7 @@ def ekalman_merge_obs(
     return comb_obs, comb_mean, comb_cov
 
 
-def kalman_predict(mean: torch.Tensor, cov: torch.Tensor, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def predict(mean: torch.Tensor, cov: torch.Tensor, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Apply the prediction logic from this Kalman filter for the dynamics matrix
     and covariances having passed and return the new means and covariances for
@@ -97,7 +97,7 @@ def kalman_predict(mean: torch.Tensor, cov: torch.Tensor, dyn_mat: torch.Tensor,
     return (dyn_mat @ mean.unsqueeze(-1)).squeeze(-1), dyn_mat @ cov @ dyn_mat.mT + dyn_cov
 
 
-def kalman_update_res(
+def update_res(
     mean: torch.Tensor, cov: torch.Tensor, obs_mat: torch.Tensor, obs_res: torch.Tensor, obs_cov: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -113,7 +113,7 @@ def kalman_update_res(
     )
 
 
-def kalman_update(
+def update(
     mean: torch.Tensor, cov: torch.Tensor, obs_mat: torch.Tensor, obs_mean: torch.Tensor, obs_cov: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -121,10 +121,10 @@ def kalman_update(
     covariance, and the matrix to extract it from the state.
     """
     res = obs_mean - (obs_mat @ mean.unsqueeze(-1)).squeeze(-1)
-    return kalman_update_res(mean, cov, obs_mat, res, obs_cov)
+    return update_res(mean, cov, obs_mat, res, obs_cov)
 
 
-def ekalman_update_ex(
+def eupdate_ex(
     mean: torch.Tensor, cov: torch.Tensor, obs_mean: torch.Tensor, obs_cov: torch.Tensor,
     obs: Callable[[torch.Tensor], torch.Tensor], obs_jac: Callable[[torch.Tensor], torch.Tensor]
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -134,7 +134,7 @@ def ekalman_update_ex(
     """
     res = obs_mean - obs(mean)
     jac = obs_jac(mean)
-    return kalman_update_res(mean, cov, jac, res, obs_cov)
+    return update_res(mean, cov, jac, res, obs_cov)
 
 
 def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor) -> torch.Tensor:
@@ -147,7 +147,7 @@ def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor)
     return jac_flat.reshape(*Bs, M, N)
 
 
-def ekalman_update(
+def eupdate(
     mean: torch.Tensor, cov: torch.Tensor,
     obs_mean: torch.Tensor, obs_cov: torch.Tensor, obs: Callable[[torch.Tensor], torch.Tensor],
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -155,4 +155,4 @@ def ekalman_update(
     Apply update using Extended Kalman filtering give an observation function,
     but using PyTorch functionality to automatically compute the Jacobian.
     """
-    return ekalman_update_ex(mean, cov, obs_mean, obs_cov, obs, lambda x: batched_jacobian(obs, x))
+    return eupdate_ex(mean, cov, obs_mean, obs_cov, obs, lambda x: batched_jacobian(obs, x))

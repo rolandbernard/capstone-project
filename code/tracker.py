@@ -1,6 +1,9 @@
 
 import torch
 
+import util
+import camera
+import kalman
 from camera import Camera
 from detect import PoseDetector
 from kalman import LinearPhysics
@@ -17,9 +20,10 @@ class Track:
     def __init__(self, id: int, init_mean: torch.Tensor, init_cov: torch.Tensor, num_keypoint=17, num_dim=3):
         self.id = id
         self.num_detection = 0
+        self.last_detection = 0
         self.num_keypoint = num_keypoint
         self.num_dim = num_dim
-        self.update(init_mean, init_cov)
+        self.moved(init_mean, init_cov)
 
     def moved(self, mean: torch.Tensor, cov: torch.Tensor):
         """
@@ -56,7 +60,7 @@ class Track:
         use `get_covariances`.
         """
         tot = self.num_keypoint*self.num_dim
-        return self.cov[:tot, :tot].view(-1, self.num_dim, self.num_keypoint, self.num_dim)
+        return self.cov[:tot, :tot]
 
     def get_covariances(self) -> torch.Tensor:
         """
@@ -64,8 +68,14 @@ class Track:
         marginalized for each keypoint even if there are inter-keypoint variances.
         May return a small diagonal matrix if not implemented.
         """
-        blocks = torch.diagonal(self.get_full_covariances(), dim1=0, dim2=2)
-        return blocks.permute(2, 0, 1)
+        return per_point_cov(self.get_full_covariances())
+
+
+def per_point_cov(covar: torch.Tensor, num_dim: int = 3) -> torch.Tensor:
+    *Bs, N, N = covar.shape
+    by_point = covar.view(-1, N // num_dim, num_dim, N // num_dim, num_dim)
+    blocks = torch.diagonal(by_point, dim1=1, dim2=3)
+    return blocks.permute(0, 3, 1, 2).view(*Bs, -1, num_dim, num_dim)
 
 
 class Tracker:
@@ -89,9 +99,9 @@ class Tracker:
         Get the internal state prediction for the given time in the future. By
         default, if no time step is given, the current prediction is returned.
         """
-        if ts == self.last_ts:
+        if dt == 0.0:
             # We don't really predict, we assume everything stays the same.
-            return [track for track in self.tracks if track.num_detection > self.min_age]
+            return [track for track in self.tracks if track.num_detection >= self.min_age]
         else:
             pass  # TODO
 
@@ -107,7 +117,7 @@ class Tracker:
         for track, mean, cov in zip(self.tracks, means, covs):
             track.moved(mean, cov)
 
-    def associate_pred_to_detection(self, cam: Camera, detections: torch.Tensor) -> list[torch.Tensor]:
+    def associate_pred_to_detection(self, cam: Camera, kpts: torch.Tensor, covs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Associate the given detections to one of the existing tracks. At most
         one detection in associated to each track. Returns two tensors of shape
@@ -115,7 +125,7 @@ class Tracker:
         """
         pass
 
-    def associate_detections(self, cams: list[Camera], detections: list[torch.Tensor]) -> list[torch.Tensor]:
+    def associate_detections(self, cams: list[Camera], detections: list[tuple[torch.Tensor, torch.Tensor]]) -> list[torch.Tensor]:
         """
         Associate the given detections to one of the existing tracks. At most
         one detection in associated to each track. Returns tensors with index
@@ -123,17 +133,62 @@ class Tracker:
         """
         pass
 
+    def new_track(self, mean: torch.Tensor) -> Track:
+        """
+        Create a new track with the given mean.
+        """
+
     def update(self, cams: list[Camera], imgs: list[torch.Tensor]):
         """
         Update the internal track states based on new incoming images, but don't
         perform any internal time step updates.
         """
         detections = self.detector.detect(cams, imgs)
-
-        # prediction = torch.stack([track.state.view(-1, 3)
-        #                          for track in self.tracks])
-        # detections = self.detector.detect(imgs)[0]
-        # cost_mat = prediction[:, None, :, 0:2] - detections[None, :, :, 0:2]
-        # cost_mat = cost_mat*cost_mat
-        # visible = prediction[:, None, :, 2:3] * detections[None, :, :, 2:3]
-        # cost_mat = (cost_mat * visible).sum(dim=(2, 3)) / visible.sum(dim=-1)
+        obs: list[list[tuple[Camera, torch.Tensor, torch.Tensor]]] \
+            = [[] for _ in range(len(self.tracks))]
+        nomatch = []
+        for cam, (kpts, covs) in zip(cams, detections):
+            tr_idx, det_idx = self.associate_pred_to_detection(cam, kpts, covs)
+            for ti, di in zip(tr_idx, det_idx):
+                obs[ti].append((cam, kpts[di], covs[di]))
+            nomatch.append((
+                util.remove_idx(kpts, det_idx), util.remove_idx(covs, det_idx)
+            ))
+        new_tracks = []
+        for track, ob in zip(self.tracks, obs):
+            if len(ob) != 0:
+                obf, ob_m, ob_v = kalman.emerge_obs(
+                    [lambda x: cam.project_pinhole(x.view(-1, 3)[:17]).flatten()
+                     for cam, _, _ in ob],
+                    [mean for _, mean, _ in ob],
+                    [cov for _, _, cov in ob]
+                )
+                mean, cov = kalman.eupdate(
+                    track.mean, track.cov, ob_m, ob_v, obf)
+                track.update(mean, cov)
+                new_tracks.append(track)
+            else:
+                track.no_update()
+                if track.num_detection >= self.min_age and track.last_detection <= self.max_inv:
+                    new_tracks.append(track)
+        matched = self.associate_detections(cams, nomatch)
+        for match in zip(matched):
+            m_cams, m_kpts, m_covs = [], [], []
+            for cam, m in zip(cams, match):
+                if m != -1:
+                    m_cams.append(cam)
+                    kpts, covs = nomatch[m]
+                    m_kpts.append(kpts)
+                    m_covs.append(per_point_cov(kpts))
+            if len(m_cams) >= 2:
+                mean = camera.triangulate_undistorted(m_cams, m_kpts, m_covs)
+                track = self.new_track(mean)
+                obf, ob_m, ob_v = kalman.emerge_obs(
+                    [lambda x: cam.project_pinhole(x.view(-1, 3)[:17]).flatten()
+                     for cam in m_cams],
+                    m_kpts, m_covs
+                )
+                mean, cov = kalman.eupdate(
+                    track.mean, track.cov, ob_m, ob_v, obf)
+                track.update()
+        self.tracks = new_tracks

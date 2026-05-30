@@ -28,6 +28,15 @@ def set_seed(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
+def remove_idx(input: torch.Tensor, idx: torch.Tensor, dim=0) -> torch.Tensor:
+    """
+    Remove all indices in `idx` from the input tensor at dimension `dim`.
+    """
+    mask = torch.ones(input.shape[dim], dtype=torch.bool, device=input.device)
+    mask[idx] = False
+    return torch.index_select(input, dim, torch.nonzero(mask).squeeze())
+
+
 class NetStorage:
     """
     This class provides some utility methods for recoding training history, as
