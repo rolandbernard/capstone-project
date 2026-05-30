@@ -56,7 +56,7 @@ class PoseDetector:
                 var = bb_size * bb_size * \
                     (self.var_vis / (vis + self.var_vis / self.var_inv))
                 results.append((
-                    valid_points[:, :, 0:2],
+                    valid_points[:, :, 0:2].reshape(-1, self.num_keypoint*2),
                     torch.kron(torch.diag_embed(var),
                                torch.eye(2, device=var.device))
                 ))

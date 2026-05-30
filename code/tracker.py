@@ -99,11 +99,11 @@ class Tracker:
         Get the internal state prediction for the given time in the future. By
         default, if no time step is given, the current prediction is returned.
         """
-        if dt == 0.0:
+        if dt is None or dt == 0.0:
             # We don't really predict, we assume everything stays the same.
             return [track for track in self.tracks if track.num_detection >= self.min_age]
         else:
-            pass  # TODO
+            raise NotImplementedError
 
     def predict(self, dt: float):
         """
@@ -123,7 +123,7 @@ class Tracker:
         one detection in associated to each track. Returns two tensors of shape
         where the first has index of the tracks.
         """
-        pass
+        raise NotImplementedError
 
     def associate_detections(self, cams: list[Camera], detections: list[tuple[torch.Tensor, torch.Tensor]]) -> list[torch.Tensor]:
         """
@@ -131,12 +131,20 @@ class Tracker:
         one detection in associated to each track. Returns tensors with index
         into the given detections array.
         """
-        pass
+        raise NotImplementedError
 
     def new_track(self, mean: torch.Tensor) -> Track:
         """
         Create a new track with the given mean.
         """
+        self.last_id += 1
+        full_mean = torch.zeros(17*3 + 17*3)
+        full_mean[:17*3] = mean
+        full_cov = torch.diag(torch.concat([
+            torch.full((17*3,), 2**2),
+            torch.full((17*3,), 10**2),
+        ]))
+        return Track(self.last_id, full_mean, full_cov)
 
     def update(self, cams: list[Camera], imgs: list[torch.Tensor]):
         """
@@ -179,9 +187,13 @@ class Tracker:
                     m_cams.append(cam)
                     kpts, covs = nomatch[m]
                     m_kpts.append(kpts)
-                    m_covs.append(per_point_cov(kpts))
+                    m_covs.append(kpts)
             if len(m_cams) >= 2:
-                mean = camera.triangulate_undistorted(m_cams, m_kpts, m_covs)
+                mean = camera.triangulate_undistorted(
+                    m_cams,
+                    [m.view(-1, 2) for m in m_kpts],
+                    [per_point_cov(c) for c in m_covs]
+                )
                 track = self.new_track(mean)
                 obf, ob_m, ob_v = kalman.emerge_obs(
                     [lambda x: cam.project_pinhole(x.view(-1, 3)[:17]).flatten()
@@ -190,5 +202,6 @@ class Tracker:
                 )
                 mean, cov = kalman.eupdate(
                     track.mean, track.cov, ob_m, ob_v, obf)
-                track.update()
+                track.update(mean, cov)
+                new_tracks.append(track)
         self.tracks = new_tracks
