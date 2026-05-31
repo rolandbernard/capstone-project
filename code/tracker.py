@@ -1,5 +1,6 @@
 
 import torch
+import scipy.optimize
 
 import util
 import camera
@@ -51,7 +52,8 @@ class Track:
         Get the keypoints for this track. The keypoints should be derived from
         the internal state of the track in some implementation defined way.
         """
-        return self.mean.view(-1, self.num_dim)[:self.num_keypoint]
+        tot = self.num_keypoint*self.num_dim
+        return self.mean[:tot].view(-1, self.num_dim)
 
     def get_full_covariances(self) -> torch.Tensor:
         """
@@ -123,7 +125,40 @@ class Tracker:
         one detection in associated to each track. Returns two tensors of shape
         where the first has index of the tracks.
         """
-        raise NotImplementedError
+        num_detect = kpts.shape[0]
+        num_track = len(self.tracks)
+        if num_detect == 0 or num_track == 0:
+            return (
+                torch.tensor([], dtype=torch.long, device=kpts.device),
+                torch.tensor([], dtype=torch.long, device=kpts.device)
+            )
+        # Project track to 2d camera plane. Also project covariances.
+        pred_means = torch.stack([track.mean[:17*3] for track in self.tracks])
+        pred_kpts = cam.project(pred_means.view(-1, 3)).view(-1, 17*3)
+        pred_jacs = kalman.batched_jacobian(
+            lambda x: cam.project(x.view(-1, 3)).view(-1, 17*3), pred_means)
+        pred_covar = torch.stack([track.cov[:17*3, :17*3]
+                                 for track in self.tracks])
+        pred_covar = pred_jacs @ pred_covar @ pred_jacs.mT
+        # Build cost matrix.
+        cost_matrix = torch.zeros(
+            (num_track + num_detect, num_detect), device=kpts.device)
+        for j in range(num_detect):
+            dist = (kpts[j] - pred_kpts).unsqueeze(-1)
+            total_cov = covs[j] + pred_covar
+            dist = dist.mT @ torch.linalg.solve(total_cov, dist)
+            _, logdet = torch.linalg.slogdet(total_cov)
+            cost_matrix[:, j] = dist + logdet - 3
+        # Run Hungarian matching.
+        cost_np = cost_matrix.cpu().numpy()
+        row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
+        # Filter out matches that matched with dummies.
+        valid_mask = row_ind < num_track
+        tr_idx = torch.tensor(
+            row_ind[valid_mask], dtype=torch.long, device=kpts.device)
+        det_idx = torch.tensor(
+            col_ind[valid_mask], dtype=torch.long, device=kpts.device)
+        return tr_idx, det_idx
 
     def associate_detections(self, cams: list[Camera], detections: list[tuple[torch.Tensor, torch.Tensor]]) -> list[torch.Tensor]:
         """
@@ -151,7 +186,9 @@ class Tracker:
         Update the internal track states based on new incoming images, but don't
         perform any internal time step updates.
         """
+        # Perform 2d detection on each image.
         detections = self.detector.detect(cams, imgs)
+        # Match each images detections to tracks.
         obs: list[list[tuple[Camera, torch.Tensor, torch.Tensor]]] \
             = [[] for _ in range(len(self.tracks))]
         nomatch = []
@@ -163,10 +200,11 @@ class Tracker:
                 util.remove_idx(kpts, det_idx), util.remove_idx(covs, det_idx)
             ))
         new_tracks = []
+        # Update matched tracks using new detections.
         for track, ob in zip(self.tracks, obs):
             if len(ob) != 0:
                 obf, ob_m, ob_v = kalman.emerge_obs(
-                    [lambda x: cam.project_pinhole(x.view(-1, 3)[:17]).flatten()
+                    [lambda x: cam.project_pinhole(x[:17*3].view(-1, 3)).flatten()
                      for cam, _, _ in ob],
                     [mean for _, mean, _ in ob],
                     [cov for _, _, cov in ob]
@@ -176,9 +214,11 @@ class Tracker:
                 track.update(mean, cov)
                 new_tracks.append(track)
             else:
+                # Check if we want to delete the track.
                 track.no_update()
                 if track.num_detection >= self.min_age and track.last_detection <= self.max_inv:
                     new_tracks.append(track)
+        # Match unassigned detections to create new tracks.
         matched = self.associate_detections(cams, nomatch)
         for match in zip(matched):
             m_cams, m_kpts, m_covs = [], [], []
@@ -189,6 +229,7 @@ class Tracker:
                     m_kpts.append(kpts)
                     m_covs.append(kpts)
             if len(m_cams) >= 2:
+                # Create new track if we have more than two views.
                 mean = camera.triangulate_undistorted(
                     m_cams,
                     [m.view(-1, 2) for m in m_kpts],
@@ -196,7 +237,7 @@ class Tracker:
                 )
                 track = self.new_track(mean)
                 obf, ob_m, ob_v = kalman.emerge_obs(
-                    [lambda x: cam.project_pinhole(x.view(-1, 3)[:17]).flatten()
+                    [lambda x: cam.project_pinhole(x[:17*3].view(-1, 3)).flatten()
                      for cam in m_cams],
                     m_kpts, m_covs
                 )
