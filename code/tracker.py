@@ -166,7 +166,64 @@ class Tracker:
         one detection in associated to each track. Returns tensors with index
         into the given detections array.
         """
-        raise NotImplementedError
+        num_cams = len(cams)
+        active_tracks = []
+        for c_idx, (kpts, covs) in enumerate(detections):
+            num_detect = kpts.shape[0]
+            num_track = len(active_tracks)
+            if num_track == 0 or num_detect == 0:
+                # If no tracks exists yet, populate with first cameras detection.
+                for i in range(num_detect):
+                    active_tracks.append({c_idx: i})
+                continue
+            # Build cost matrix.
+            cost_matrix = torch.zeros((num_track + num_detect, num_detect))
+            for t_idx, track in enumerate(active_tracks):
+                for d_idx in range(num_detect):
+                    # Distance between a track and a detection is the mean
+                    # reprojection error to the track's detections.
+                    total_dist = 0.0
+                    for past_c, past_d in track.items():
+                        m_cams = [cams[past_c], cams[c_idx]]
+                        m_kpts = [detections[past_c][0][past_d], kpts[d_idx]]
+                        m_covs = [detections[past_c][1][past_d], covs[d_idx]]
+                        mean3d = camera.triangulate_undistorted(
+                            m_cams,
+                            [m.view(-1, 2) for m in m_kpts],
+                            [per_point_cov(c) for c in m_covs]
+                        )
+                        diff1 = m_kpts[0] \
+                            - m_cams[0].project_pinhole(mean3d).flatten()
+                        diff2 = m_kpts[1] \
+                            - m_cams[1].project_pinhole(mean3d).flatten()
+                        dist1 = torch.dot(
+                            diff1, torch.linalg.solve(m_covs[0], diff1))
+                        dist2 = torch.dot(
+                            diff2, torch.linalg.solve(m_covs[1], diff2))
+                        total_dist += (dist1 + dist2).item()
+                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 3
+            # Run Hungarian matching.
+            cost_np = cost_matrix.cpu().numpy()
+            row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
+            # Filter out matches that matched with dummies.
+            valid_mask = row_ind < num_track
+            tr_idx = row_ind[valid_mask]
+            det_idx = col_ind[valid_mask]
+            # Assign each matched detection to a track.
+            for t_idx, d_det in zip(tr_idx, det_idx):
+                active_tracks[t_idx][c_idx] = d_det
+            # Assign unmatched detections to new tracks.
+            matched_d = set(det_idx)
+            for d_idx in range(num_detect):
+                if d_idx not in matched_d:
+                    active_tracks.append({c_idx: d_idx})
+        # Format the dictionaries into the tuple structure expected by your update() loop
+        matched_results = []
+        for c_idx in range(num_cams):
+            matched_results.append(torch.tensor([
+                track.get(i, -1) for track in active_tracks
+            ], dtype=torch.long, device=detections[0][0].device))
+        return matched_results
 
     def new_track(self, mean: torch.Tensor) -> Track:
         """
