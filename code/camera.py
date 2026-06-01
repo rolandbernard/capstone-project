@@ -270,8 +270,8 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], cova
     Triangulate multiple points using multiple camera views. This is similar
     to `triangulate`, but the points must have be undistorted beforehand.
 
-    >>> cam1 = Camera(translation=torch.tensor([0.9, 0.0, 0.0]))
-    >>> cam2 = Camera(translation=torch.tensor([-1.1, 0.0, 0.0]))
+    >>> cam1 = Camera(translation=torch.tensor([-0.9, 0.0, 0.0]))
+    >>> cam2 = Camera(translation=torch.tensor([1.1, 0.0, 0.0]))
     >>> p1 = torch.tensor([1.0, 0.1])
     >>> p2 = torch.tensor([-1.0, 0.1])
     >>> res = triangulate_undistorted([cam1, cam2], [p1, p2])
@@ -284,6 +284,7 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], cova
     vec = []
     for cam, pts, cov in zip(cams, points, covars or [None for _ in range(len(cams))]):
         r, t = cam.rotation, cam.translation
+        t = -cam.rotation @ cam.translation
         A = r[0:2] - pts.unsqueeze(-1) * r[2]
         b = (pts * t[2] - t[0:2]).unsqueeze(-1)
         if cov is None:
@@ -304,8 +305,8 @@ def triangulate(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
     number of batch dimensions in front. The output will have the same batch
     dimensions but a final dimension of size 3.
 
-    >>> cam1 = Camera(translation=torch.tensor([1.1, 0.0, 0.0]))
-    >>> cam2 = Camera(translation=torch.tensor([-0.9, 0.0, 0.0]))
+    >>> cam1 = Camera(translation=torch.tensor([-1.1, 0.0, 0.0]))
+    >>> cam2 = Camera(translation=torch.tensor([0.9, 0.0, 0.0]))
     >>> p1 = torch.tensor([1.0, -0.1])
     >>> p2 = torch.tensor([-1.0, -0.1])
     >>> res = triangulate([cam1, cam2], [p1, p2])
