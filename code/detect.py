@@ -16,12 +16,14 @@ class PoseDetector:
 
     def __init__(
         self, model_name: str = "yolo26n-pose", threshold: float = 0.25, min_keypoint: int = 3,
-        var_min: float = 16.0, var_vis: float = 0.002, var_inv: float = 1.0, path: str = "./nets"
+        var_min: float = 16.0, var_vis: float = 0.002, var_inv: float = 1.0,
+        path: str = "./nets", compile: bool = True
     ):
         model: PoseModel = YOLO(
             f"{path}/{model_name}.pt").model  # type: ignore
         model.eval()
-        model.compile()
+        if compile:
+            model.compile()
         self.model = model
         self.threshold = threshold
         self.min_keypoint = min_keypoint

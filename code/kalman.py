@@ -34,6 +34,15 @@ class LinearPhysics:
         dyn_mat, dyn_cov = self.get_dyn(dt)
         return predict(mean, cov, dyn_mat, dyn_cov)
 
+    def to(self, *args, **kargs):
+        """
+        Apply the PyTorch `.to` method to the contained model.
+        """
+        self.dyn_mat = self.dyn_mat.to(*args, **kargs)
+        self.dyn_cov = self.dyn_cov.to(*args, **kargs)
+        self.get_dyn.cache_clear()
+        return self
+
 
 def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
     """

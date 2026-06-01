@@ -78,6 +78,7 @@ class OfflineVideoSource(VideoSource):
             success, frame = cap.read()
             if not success:
                 return None, None, None
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(torch.from_numpy(frame))
         timestamp = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
         return timestamp, frames, self.cameras
@@ -162,8 +163,9 @@ class OnlineVideoSource(VideoSource):
         timestamps = []
         for cap in self.streams:
             timestamp, frame = cap.next_frame()
-            if timestamp is None:
+            if timestamp is None or frame is None:
                 return None, None, None
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frames.append(torch.from_numpy(frame))
             timestamps.append(timestamp)
         return float(np.median(timestamps)), frames, self.cameras

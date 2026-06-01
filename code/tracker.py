@@ -190,7 +190,7 @@ class Tracker:
                         mean3d = camera.triangulate_undistorted(
                             m_cams,
                             [m.view(-1, 2) for m in m_kpts],
-                            [per_point_cov(c) for c in m_covs]
+                            [per_point_cov(c, 2) for c in m_covs]
                         )
                         diff1 = m_kpts[0] \
                             - m_cams[0].project_pinhole(mean3d).flatten()
@@ -201,7 +201,7 @@ class Tracker:
                         dist2 = torch.dot(
                             diff2, torch.linalg.solve(m_covs[1], diff2))
                         total_dist += (dist1 + dist2).item()
-                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 3
+                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 6
             # Run Hungarian matching.
             cost_np = cost_matrix.cpu().numpy()
             row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
@@ -280,7 +280,7 @@ class Tracker:
         for match in zip(matched):
             m_cams, m_kpts, m_covs = [], [], []
             for cam, m in zip(cams, match):
-                if m != -1:
+                if m.item() != -1:
                     m_cams.append(cam)
                     kpts, covs = nomatch[m]
                     m_kpts.append(kpts)
@@ -290,7 +290,7 @@ class Tracker:
                 mean = camera.triangulate_undistorted(
                     m_cams,
                     [m.view(-1, 2) for m in m_kpts],
-                    [per_point_cov(c) for c in m_covs]
+                    [per_point_cov(c, 2) for c in m_covs]
                 )
                 track = self.new_track(mean)
                 obf, ob_m, ob_v = kalman.emerge_obs(
