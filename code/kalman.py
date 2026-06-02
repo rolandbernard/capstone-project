@@ -115,7 +115,7 @@ def update_res(
     """
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
     gain = cov @ torch.linalg.solve(inov.mT, obs_mat).mT
-    *_, N, N = gain.shape
+    *_, N, N = cov.shape
     return (
         mean + (gain @ obs_res.unsqueeze(-1)).squeeze(-1),
         (torch.eye(N, device=gain.device) - gain @ obs_mat) @ cov
@@ -152,7 +152,7 @@ def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor)
     """
     *Bs, N = x.shape
     jac_flat = torch.vmap(torch.func.jacrev(f))(x.view(-1, N))
-    *_, M = jac_flat.shape
+    *_, M, N = jac_flat.shape
     return jac_flat.reshape(*Bs, M, N)
 
 

@@ -221,7 +221,7 @@ class Tracker:
         matched_results = []
         for c_idx in range(num_cams):
             matched_results.append(torch.tensor([
-                track.get(i, -1) for track in active_tracks
+                track.get(c_idx, -1) for track in active_tracks
             ], dtype=torch.long, device=detections[0][0].device))
         return matched_results
 
@@ -230,11 +230,11 @@ class Tracker:
         Create a new track with the given mean.
         """
         self.last_id += 1
-        full_mean = torch.zeros(17*3 + 17*3)
+        full_mean = torch.zeros(17*3 + 17*3, device=mean.device)
         full_mean[:17*3] = mean
         full_cov = torch.diag(torch.concat([
-            torch.full((17*3,), 2**2),
-            torch.full((17*3,), 10**2),
+            torch.full((17*3,), 2.0**2, device=mean.device),
+            torch.full((17*3,), 10.0**2, device=mean.device),
         ]))
         return Track(self.last_id, full_mean, full_cov)
 
@@ -277,21 +277,21 @@ class Tracker:
                     new_tracks.append(track)
         # Match unassigned detections to create new tracks.
         matched = self.associate_detections(cams, nomatch)
-        for match in zip(matched):
+        for match in zip(*matched):
             m_cams, m_kpts, m_covs = [], [], []
-            for cam, m in zip(cams, match):
+            for cam, m, det in zip(cams, match, nomatch):
                 if m.item() != -1:
                     m_cams.append(cam)
-                    kpts, covs = nomatch[m]
+                    kpts, covs = det[0][m], det[1][m]
                     m_kpts.append(kpts)
-                    m_covs.append(kpts)
+                    m_covs.append(covs)
             if len(m_cams) >= 2:
                 # Create new track if we have more than two views.
                 mean = camera.triangulate_undistorted(
                     m_cams,
                     [m.view(-1, 2) for m in m_kpts],
                     [per_point_cov(c, 2) for c in m_covs]
-                )
+                ).flatten()
                 track = self.new_track(mean)
                 obf, ob_m, ob_v = kalman.emerge_obs(
                     [lambda x: cam.project_pinhole(x[:17*3].view(-1, 3)).flatten()
