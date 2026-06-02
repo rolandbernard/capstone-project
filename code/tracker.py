@@ -136,7 +136,7 @@ class Tracker:
         pred_means = torch.stack([track.mean[:17*3] for track in self.tracks])
         pred_kpts = cam.project(pred_means.view(-1, 3)).view(-1, 17*3)
         pred_jacs = kalman.batched_jacobian(
-            lambda x: cam.project(x.view(-1, 3)).view(-1, 17*3), pred_means)
+            lambda x: cam.project(x.view(-1, 3)).view(-1, 17*2), pred_means)
         pred_covar = torch.stack([track.cov[:17*3, :17*3]
                                  for track in self.tracks])
         pred_covar = pred_jacs @ pred_covar @ pred_jacs.mT
@@ -261,7 +261,7 @@ class Tracker:
         for track, ob in zip(self.tracks, obs):
             if len(ob) != 0:
                 obf, ob_m, ob_v = kalman.emerge_obs(
-                    [lambda x: cam.project_pinhole(x[:17*3].view(-1, 3)).flatten()
+                    [lambda x, c=cam: c.project_pinhole(x[:17*3].view(-1, 3)).flatten()
                      for cam, _, _ in ob],
                     [mean for _, mean, _ in ob],
                     [cov for _, _, cov in ob]
@@ -294,7 +294,7 @@ class Tracker:
                 ).flatten()
                 track = self.new_track(mean)
                 obf, ob_m, ob_v = kalman.emerge_obs(
-                    [lambda x: cam.project_pinhole(x[:17*3].view(-1, 3)).flatten()
+                    [lambda x, c=cam: c.project_pinhole(x[:17*3].view(-1, 3)).flatten()
                      for cam in m_cams],
                     m_kpts, m_covs
                 )
