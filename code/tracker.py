@@ -149,7 +149,7 @@ class Tracker:
             dist = (dist.mT @ torch.linalg.solve(total_cov, dist)).flatten()
             # _, logdet = torch.linalg.slogdet(total_cov)
             # cost_matrix[:, j] = dist + logdet - 3
-            cost_matrix[:num_track, j] = dist - 3
+            cost_matrix[:num_track, j] = dist - 4
         # Run Hungarian matching.
         cost_np = cost_matrix.cpu().numpy()
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
@@ -202,7 +202,7 @@ class Tracker:
                         dist2 = torch.dot(
                             diff2, torch.linalg.solve(m_covs[1], diff2))
                         total_dist += (dist1 + dist2).item()
-                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 6
+                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 8
             # Run Hungarian matching.
             cost_np = cost_matrix.cpu().numpy()
             row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)

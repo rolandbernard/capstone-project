@@ -15,8 +15,8 @@ class PoseDetector:
     """
 
     def __init__(
-        self, model_name: str = "yolo26n-pose", threshold: float = 0.25, min_keypoint: int = 3,
-        var_min: float = 16.0, var_vis: float = 0.002, var_inv: float = 1.0,
+        self, model_name: str = "yolo26n-pose", threshold: float = 0.25, kpt_threshold: float = 0.5,
+        min_keypoint: int = 3, var_min: float = 36.0, var_vis: float = 0.006, var_inv: float = 1.0,
         path: str = "./nets", compile: bool = True
     ):
         model: PoseModel = YOLO(
@@ -26,6 +26,7 @@ class PoseDetector:
             model.compile()
         self.model = model
         self.threshold = threshold
+        self.kpt_threshold = kpt_threshold
         self.min_keypoint = min_keypoint
         self.var_min = var_min
         self.var_vis = var_vis
@@ -50,13 +51,13 @@ class PoseDetector:
             results = []
             for img_res in pred:
                 valid = img_res[(img_res[:, 4] > self.threshold) &
-                                ((img_res[:, 8::3] > self.threshold).sum() >= self.min_keypoint)]
+                                ((img_res[:, 8::3] > self.kpt_threshold).sum() >= self.min_keypoint)]
                 valid_points = valid[:, 6:].view(-1, self.num_keypoint, 3)
                 # Compute variance based on bounding box size and kpt visibility.
                 bb_size = torch.linalg.vector_norm(
                     valid[:, 2:4] - valid[:, 0:2], dim=1, keepdim=True)
                 vis = torch.clamp(
-                    (valid_points[:, :, 2] - self.threshold) / (1.0 - self.threshold), min=0)
+                    (valid_points[:, :, 2] - self.kpt_threshold) / (1.0 - self.kpt_threshold), min=0)
                 var = self.var_min + bb_size * bb_size * \
                     (self.var_vis / (vis + self.var_vis / self.var_inv))
                 results.append((
