@@ -134,9 +134,9 @@ class Tracker:
             )
         # Project track to 2d camera plane. Also project covariances.
         pred_means = torch.stack([track.mean[:17*3] for track in self.tracks])
-        pred_kpts = cam.project(pred_means.view(-1, 3)).view(-1, 17*3)
+        pred_kpts = cam.project_pinhole(pred_means.view(-1, 3)).view(-1, 17*2)
         pred_jacs = kalman.batched_jacobian(
-            lambda x: cam.project(x.view(-1, 3)).view(-1, 17*2), pred_means)
+            lambda x: cam.project_pinhole(x.view(-1, 3)).view(-1, 17*2), pred_means)
         pred_covar = torch.stack([track.cov[:17*3, :17*3]
                                  for track in self.tracks])
         pred_covar = pred_jacs @ pred_covar @ pred_jacs.mT
@@ -146,9 +146,10 @@ class Tracker:
         for j in range(num_detect):
             dist = (kpts[j] - pred_kpts).unsqueeze(-1)
             total_cov = covs[j] + pred_covar
-            dist = dist.mT @ torch.linalg.solve(total_cov, dist)
-            _, logdet = torch.linalg.slogdet(total_cov)
-            cost_matrix[:, j] = dist + logdet - 3
+            dist = (dist.mT @ torch.linalg.solve(total_cov, dist)).flatten()
+            # _, logdet = torch.linalg.slogdet(total_cov)
+            # cost_matrix[:, j] = dist + logdet - 3
+            cost_matrix[:num_track, j] = dist - 3
         # Run Hungarian matching.
         cost_np = cost_matrix.cpu().numpy()
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
