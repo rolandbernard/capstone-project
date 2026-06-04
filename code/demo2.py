@@ -48,37 +48,15 @@ class SkeletonPlayer:
         self.pl.set_background("white")
 
         self.setup_ground()
-        self.setup_cameras()
         self.setup_widgets()
         self.update_scene(0)
 
     def setup_ground(self):
         ground = pv.Plane(
-            center=(10, 4, 0), direction=(0, 0, 1), i_size=10,
+            center=(0, 0, 0), direction=(0, 1, 0), i_size=10,
             j_size=10, i_resolution=20, j_resolution=20
         )
         self.pl.add_mesh(ground, style="wireframe", color="lightgray")
-
-    def setup_cameras(self):
-        for cam in self.cameras:
-            R = cam.rotation.cpu().numpy()
-            T = cam.translation.cpu().numpy()
-            T = T.flatten()
-            camera_center = T
-            dir_x = R[0, :]
-            dir_y = R[1, :]
-            dir_z = R[2, :] # viewing direction
-            # Camera center as sphere.
-            camera_sphere = pv.Sphere(radius=0.25, center=camera_center)
-            self.pl.add_mesh(camera_sphere, color="white")
-            self.pl.add_point_labels(
-                [camera_center], [f"Cam {cid}"], font_size=14,
-                text_color="black", show_points=False
-            )
-            # Camera axes as arrows.
-            self.pl.add_arrows(camera_center, dir_x, mag=1, color="red")
-            self.pl.add_arrows(camera_center, dir_y, mag=1, color="green")
-            self.pl.add_arrows(camera_center, dir_z, mag=1, color="blue")
 
     def get_or_create_track(self, track_id):
         if track_id not in self.track_meshes:
@@ -154,7 +132,7 @@ class SkeletonPlayer:
             interaction_event="always"
         )
         self.pl.add_timer_event(
-            max_steps=1000000, duration=1000//15, callback=self.timer_callback)
+            max_steps=1000000, duration=1000//25, callback=self.timer_callback)
         self.pl.add_key_event("space", self.toggle_play)
         self.pl.add_key_event("Right", self.next_frame)
         self.pl.add_key_event("Left", self.prev_frame)
@@ -166,7 +144,7 @@ class SkeletonPlayer:
 if __name__ == "__main__":
     frames = []
     for i in range(1, 1500):
-        with open(f"code/data/demo/{i}.json", "r") as f:
+        with open(f"code/data/demo2/{i}.json", "r") as f:
             tracks = json.load(f)
         frames.append([
             Track(track["id"], track["kpts"], track["covs"])

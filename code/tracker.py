@@ -113,11 +113,12 @@ class Tracker:
         the internal state of all tracks accordingly, but without using any new
         external information.
         """
-        means = torch.stack([track.mean for track in self.tracks])
-        covs = torch.stack([track.cov for track in self.tracks])
-        means, covs = self.physics.predict(dt, means, covs)
-        for track, mean, cov in zip(self.tracks, means, covs):
-            track.moved(mean, cov)
+        if len(self.tracks) != 0:
+            means = torch.stack([track.mean for track in self.tracks])
+            covs = torch.stack([track.cov for track in self.tracks])
+            means, covs = self.physics.predict(dt, means, covs)
+            for track, mean, cov in zip(self.tracks, means, covs):
+                track.moved(mean, cov)
 
     def associate_pred_to_detection(self, cam: Camera, kpts: torch.Tensor, covs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -149,7 +150,7 @@ class Tracker:
             dist = (dist.mT @ torch.linalg.solve(total_cov, dist)).flatten()
             # _, logdet = torch.linalg.slogdet(total_cov)
             # cost_matrix[:, j] = dist + logdet - 3
-            cost_matrix[:num_track, j] = dist - 8
+            cost_matrix[:num_track, j] = dist - 32
         # Run Hungarian matching.
         cost_np = cost_matrix.cpu().numpy()
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
@@ -202,7 +203,7 @@ class Tracker:
                         dist2 = torch.dot(
                             diff2, torch.linalg.solve(m_covs[1], diff2))
                         total_dist += (dist1 + dist2).item()
-                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 8
+                    cost_matrix[t_idx, d_idx] = total_dist / len(track) - 24
             # Run Hungarian matching.
             cost_np = cost_matrix.cpu().numpy()
             row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
