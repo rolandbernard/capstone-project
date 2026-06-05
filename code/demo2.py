@@ -31,7 +31,7 @@ class Track:
 
 
 class SkeletonPlayer:
-    def __init__(self, cameras, frames, cov_threshold=1.0):
+    def __init__(self, cameras, frames, cov_threshold=0.0):
         self.cameras = cameras
         self.frames = frames
         self.num_frames = len(frames)
