@@ -17,7 +17,7 @@
 
 \title{Human Pose Estimation}
 \author{Roland Bernard}
-\date{February 2026}
+\date{June 2026}
 
 \definecolor{unibzblue}{HTML}{0086ec}
 \definecolor{unibzblue2}{HTML}{f0f8ff}
@@ -125,24 +125,74 @@
 \end{frame}
 
 \begin{frame}
-\frametitle{What to do next?}
+\frametitle{How am I trying to solve it?}
   \begin{items}
     \begin{oitem}{\litem}
       Summary: \\
-      \sitem {\footnotesize Joint spatiotemporal modeling (ConvGRU) offers the best accuracy.} \\
-      \sitem {\footnotesize However, stacked CNN may be preferred, as lower-resource alternative for real-time use.}
+      \sitem {\footnotesize Perform single-view single-frame 2D estimation using pretrained model.} \\
+      \sitem {\footnotesize Reconstruct 3D geometry from multiple camera views via triangulation.} \\
+      \sitem {\footnotesize Apply Kalman filtering to smooth out noise.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/approach.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{What makes this difficult?}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Challenges: \\
+      \sitem {\footnotesize Occlusions can make some joints unobserved.} \\
+      \sitem {\footnotesize Matching predictions between multiple views.} \\
+      \sitem {\footnotesize Matching predictions across time.} \\
+      \sitem {\footnotesize Noisy 2D estimates make the above more difficult.} \\
+      \sitem {\footnotesize 2D pose estimator often misses some people.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/difficulties.png}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Current Approach -- Extended Kalman Filter}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Keep internal 3D state of all currently tracked persons.} \\
+      {\footnotesize Repeat for each frame:} \\
+      \sitem {\footnotesize Predict next frame state using current state.} \\
+      \sitem {\footnotesize Match predictions with detections.} \\
+      \quad \sitem {\footnotesize Update internal 3D state using detections.} \\
+      \sitem {\footnotesize Associate unmatched detections between views.} \\
+      \quad \sitem {\footnotesize Create new internal state using triangulation.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=0.7\linewidth]{figures/kalman.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{What to do next?}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Learn filter parameters from data. \\
+      \sitem {\footnotesize Currently, just guessed manually.}
     \end{oitem}
     \begin{oitem}{\litem}
-      Limitations: \\
-      \sitem {\footnotesize Blurry predictions due to loss function.} \\
-      \sitem {\footnotesize High computational cost for recurrent models.}
+      Add constraint that forces consistency of joint lengths. \\
+      \sitem {\footnotesize To improve results if person is partially occluded.}
     \end{oitem}
     \begin{oitem}{\litem}
-      Possible Future Improvements: \\
-      \sitem {\footnotesize Use SSIM or GAN (Adversarial) loss to sharpen images.} \\
-      \sitem {\footnotesize Incorporate raw satellite channels or weather data.}\\
-      \sitem {\footnotesize Train natively with autoregressive feedback.} \\
-      \sitem {\footnotesize Use more advanced recurrent units, e.g., TrajGRU or LSTA.}
+      Try using a particle filter with occlusion aware likelihood. \\
+      \sitem {\footnotesize More expressive than Kalman filter.} \\
+      \sitem {\footnotesize Could accurately model occlusions.}
     \end{oitem}
   \end{items}
 \end{frame}
