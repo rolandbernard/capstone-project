@@ -82,6 +82,33 @@ class Camera:
                 float(section["k3"]),
             ])
 
+    def scale(self, scale: float):
+        """
+        Scale the camera extrinsics by the given scale.
+        """
+        self.translation = scale * self.translation
+
+    def resize(self, old: tuple[int, int], new: tuple[int, int]):
+        """
+        Modify the camera intrinsics to accommodate a image resizing. 
+        """
+        s_x, s_y = new[0] / old[0], new[1] / old[1]
+        self.intrinsic = torch.stack([
+            s_x * self.intrinsic[0],
+            s_y * self.intrinsic[1],
+            self.intrinsic[2],
+        ])
+
+    def crop(self, x: int, y: int):
+        """
+        Modify the camera intrinsics to accommodate a image crop. You must
+        specify the top left corner of the crop.
+        """
+        self.intrinsic = torch.stack([
+            self.intrinsic[:, 0:2],
+            self.intrinsic[:, 2] - torch.tensor([x, y, 0], dtype=torch.float),
+        ], dim=1)
+
     def project_pinhole(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane.
