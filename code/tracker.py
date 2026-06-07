@@ -88,13 +88,19 @@ class Tracker:
     observed for some time.
     """
 
-    def __init__(self, detector: PoseDetector, physics: LinearPhysics, min_age: int = 3, max_inv: int = 30):
+    def __init__(
+        self, detector: PoseDetector, physics: LinearPhysics, min_age: int = 3, max_inv: int = 30,
+        match_threshold: float = 0.0, min_var=1e-5, num_keypoint: int = 17
+    ):
         self.tracks: list[Track] = []
         self.last_id = 0
         self.detector = detector
         self.physics = physics
         self.min_age = min_age
         self.max_inv = max_inv
+        self.match_threshold = match_threshold
+        self.min_var = min_var
+        self.num_keypoint = num_keypoint
 
     def get_prediction(self, dt: None | float = None) -> list[Track]:
         """
@@ -126,7 +132,7 @@ class Tracker:
         one detection in associated to each track. Returns two tensors of shape
         where the first has index of the tracks.
         """
-        num_detect = kpts.shape[0]
+        num_detect, num_dim = kpts.shape
         num_track = len(self.tracks)
         if num_detect == 0 or num_track == 0:
             return (
@@ -134,11 +140,11 @@ class Tracker:
                 torch.tensor([], dtype=torch.long, device=kpts.device)
             )
         # Project track to 2d camera plane. Also project covariances.
-        pred_means = torch.stack([track.mean[:17*3] for track in self.tracks])
-        pred_kpts = cam.project_pinhole(pred_means.view(-1, 3)).view(-1, 17*2)
-        pred_jacs = kalman.batched_jacobian(
-            lambda x: cam.project_pinhole(x.view(-1, 3)).view(-1, 17*2), pred_means)
-        pred_covar = torch.stack([track.cov[:17*3, :17*3]
+        pred_means = torch.stack(
+            [track.mean[:self.num_keypoint*3] for track in self.tracks])
+        pred_jacs, pred_kpts = kalman.batched_jacobian(
+            lambda x: cam.project_pinhole(x.view(-1, 3)).view(-1, self.num_keypoint*2), pred_means)
+        pred_covar = torch.stack([track.cov[:self.num_keypoint*3, :self.num_keypoint*3]
                                  for track in self.tracks])
         pred_covar = pred_jacs @ pred_covar @ pred_jacs.mT
         # Build cost matrix.
@@ -148,19 +154,16 @@ class Tracker:
             dist = (kpts[j] - pred_kpts).unsqueeze(-1)
             total_cov = covs[j] + pred_covar
             dist = (dist.mT @ torch.linalg.solve(total_cov, dist)).flatten()
-            # _, logdet = torch.linalg.slogdet(total_cov)
-            # cost_matrix[:, j] = dist + logdet - 3
-            cost_matrix[:num_track, j] = dist - 32
+            _, logdet = torch.linalg.slogdet(total_cov)
+            cost_matrix[:num_track, j] = dist + logdet - num_dim*self.match_threshold
         # Run Hungarian matching.
         cost_np = cost_matrix.cpu().numpy()
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_np)
         # Filter out matches that matched with dummies.
-        valid_mask = row_ind < num_track
-        tr_idx = torch.tensor(
-            row_ind[valid_mask], dtype=torch.long, device=kpts.device)
-        det_idx = torch.tensor(
-            col_ind[valid_mask], dtype=torch.long, device=kpts.device)
-        return tr_idx, det_idx
+        tr_idx = torch.tensor(row_ind, dtype=torch.long, device=kpts.device)
+        det_idx = torch.tensor(col_ind, dtype=torch.long, device=kpts.device)
+        valid_mask = tr_idx < num_track
+        return tr_idx[valid_mask], det_idx[valid_mask]
 
     def associate_detections(self, cams: list[Camera], detections: list[tuple[torch.Tensor, torch.Tensor]]) -> list[torch.Tensor]:
         """
@@ -232,13 +235,28 @@ class Tracker:
         Create a new track with the given mean.
         """
         self.last_id += 1
-        full_mean = torch.zeros(17*3 + 17*3, device=mean.device)
-        full_mean[:17*3] = mean
-        full_cov = torch.diag(torch.concat([
-            torch.full((17*3,), 2.0**2, device=mean.device),
-            torch.full((17*3,), 10.0**2, device=mean.device),
-        ]))
-        return Track(self.last_id, full_mean, full_cov)
+        full_mean = self.physics.init_mean.clone()
+        full_mean[:self.num_keypoint*3] = mean
+        full_cov = self.physics.init_cov.clone()
+        return Track(self.last_id, full_mean, full_cov, self.num_keypoint)
+
+    def constrain_covars(self):
+        """
+        Constrain the covariances to avoid them becoming too small.
+        """
+        for track in self.tracks:
+            track.cov.diagonal().clamp(min=self.min_var)
+
+    def update_track(self, track: Track, cams: list[Camera], kpts: list[torch.Tensor], covs: list[torch.Tensor]):
+        obf, ob_m, ob_v = kalman.emerge_obs(
+            [lambda x, c=cam: c.project_pinhole(x[:self.num_keypoint*3].view(-1, 3)).flatten()
+             for cam in cams],
+            [mean for mean in kpts],
+            [cov for cov in covs]
+        )
+        mean, cov = kalman.eupdate(
+            track.mean, track.cov, ob_m, ob_v, obf)
+        track.update(mean, cov)
 
     def update(self, cams: list[Camera], imgs: list[torch.Tensor]):
         """
@@ -248,29 +266,23 @@ class Tracker:
         # Perform 2d detection on each image.
         detections = self.detector.detect(cams, imgs)
         # Match each images detections to tracks.
-        obs: list[list[tuple[Camera, torch.Tensor, torch.Tensor]]] \
-            = [[] for _ in range(len(self.tracks))]
+        obs: list[tuple[list[Camera], list[torch.Tensor], list[torch.Tensor]]] \
+            = [([], [], []) for _ in range(len(self.tracks))]
         nomatch = []
         for cam, (kpts, covs) in zip(cams, detections):
             tr_idx, det_idx = self.associate_pred_to_detection(cam, kpts, covs)
             for ti, di in zip(tr_idx, det_idx):
-                obs[ti].append((cam, kpts[di], covs[di]))
+                obs[ti][0].append(cam)
+                obs[ti][1].append(kpts[di])
+                obs[ti][2].append(covs[di])
             nomatch.append((
                 util.remove_idx(kpts, det_idx), util.remove_idx(covs, det_idx)
             ))
         new_tracks = []
         # Update matched tracks using new detections.
-        for track, ob in zip(self.tracks, obs):
-            if len(ob) != 0:
-                obf, ob_m, ob_v = kalman.emerge_obs(
-                    [lambda x, c=cam: c.project_pinhole(x[:17*3].view(-1, 3)).flatten()
-                     for cam, _, _ in ob],
-                    [mean for _, mean, _ in ob],
-                    [cov for _, _, cov in ob]
-                )
-                mean, cov = kalman.eupdate(
-                    track.mean, track.cov, ob_m, ob_v, obf)
-                track.update(mean, cov)
+        for track, (ob_cams, ob_kpts, ob_covs) in zip(self.tracks, obs):
+            if len(ob_cams) != 0:
+                self.update_track(track, ob_cams, ob_kpts, ob_covs)
                 new_tracks.append(track)
             else:
                 # Check if we want to delete the track.
@@ -295,13 +307,6 @@ class Tracker:
                     [per_point_cov(c, 2) for c in m_covs]
                 ).flatten()
                 track = self.new_track(mean)
-                obf, ob_m, ob_v = kalman.emerge_obs(
-                    [lambda x, c=cam: c.project_pinhole(x[:17*3].view(-1, 3)).flatten()
-                     for cam in m_cams],
-                    m_kpts, m_covs
-                )
-                mean, cov = kalman.eupdate(
-                    track.mean, track.cov, ob_m, ob_v, obf)
-                track.update(mean, cov)
+                self.update_track(track, m_cams, m_kpts, m_covs)
                 new_tracks.append(track)
         self.tracks = new_tracks

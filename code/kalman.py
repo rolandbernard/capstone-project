@@ -13,10 +13,12 @@ class LinearPhysics:
     of targets.
     """
 
-    def __init__(self, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
+    def __init__(self, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor, init_mean: torch.Tensor, init_cov: torch.Tensor):
         super().__init__()
         self.dyn_mat = dyn_mat
         self.dyn_cov = dyn_cov
+        self.init_mean = init_mean
+        self.init_cov = init_cov
         self.get_dyn = lru_cache()(self._get_dyn)
 
     def _get_dyn(self, dt: float) -> tuple[torch.Tensor, torch.Tensor]:
@@ -40,6 +42,8 @@ class LinearPhysics:
         """
         self.dyn_mat = self.dyn_mat.to(*args, **kargs)
         self.dyn_cov = self.dyn_cov.to(*args, **kargs)
+        self.init_mean = self.init_mean.to(*args, **kargs)
+        self.init_cov = self.init_cov.to(*args, **kargs)
         self.get_dyn.cache_clear()
         return self
 
@@ -135,25 +139,28 @@ def update(
 
 def eupdate_ex(
     mean: torch.Tensor, cov: torch.Tensor, obs_mean: torch.Tensor, obs_cov: torch.Tensor,
-    obs: Callable[[torch.Tensor], torch.Tensor], obs_jac: Callable[[torch.Tensor], torch.Tensor]
+    obs: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Apply update using Extended Kalman filtering give an explicit formulation of
     the Jacobian as a function.
     """
-    res = obs_mean - obs(mean)
-    jac = obs_jac(mean)
+    jac, pred = obs(mean)
+    res = obs_mean - pred
     return update_res(mean, cov, jac, res, obs_cov)
 
 
-def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor) -> torch.Tensor:
+def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute the Jacobian over arbitrarily batch dimension of the given function f.
     """
+    def func(x):
+        res = f(x)
+        return res, res
     *Bs, N = x.shape
-    jac_flat = torch.vmap(torch.func.jacrev(f))(x.view(-1, N))
-    *_, M, N = jac_flat.shape
-    return jac_flat.reshape(*Bs, M, N)
+    jac, val = torch.vmap(torch.func.jacrev(func, has_aux=True))(x.view(-1, N))
+    *_, M, N = jac.shape
+    return jac.reshape(*Bs, M, N), val.reshape(*Bs, M)
 
 
 def eupdate(
@@ -164,4 +171,4 @@ def eupdate(
     Apply update using Extended Kalman filtering give an observation function,
     but using PyTorch functionality to automatically compute the Jacobian.
     """
-    return eupdate_ex(mean, cov, obs_mean, obs_cov, obs, lambda x: batched_jacobian(obs, x))
+    return eupdate_ex(mean, cov, obs_mean, obs_cov, lambda x: batched_jacobian(obs, x))

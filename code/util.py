@@ -8,7 +8,6 @@ import pandas as pd
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
 # The set of links between keypoints that make up the skeleton in the COCO pose model.
 SKELETON = [
     [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11],

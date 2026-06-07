@@ -62,9 +62,10 @@ class Camera:
                  for col in range(3)]
                 for row in range(3)
             ])
-            self.translation = torch.tensor([
+            t = torch.tensor([
                 float(config["Extrinsics"][f"T{row + 1}"]) for row in range(3)
             ])
+            self.translation = -self.rotation @ t
         if config.has_section("Intrinsics"):
             section = config["Intrinsics"]
             f = float(section["f"])
@@ -81,48 +82,6 @@ class Camera:
                 float(section["k3"]),
             ])
 
-    def save_ini(self, path: str, save_extrinsics=True):
-        """
-        Save the calibration parameters to a file in a .ini format. Optionally it
-        is possible to not save the extrinsic parameters. This is useful in cases
-        where the stored extrinsics are not meaningful.
-
-        >>> import tempfile, os
-        >>> cam = Camera(translation=torch.tensor([5.0, -2.0, 0.5]))
-        >>> with tempfile.NamedTemporaryFile('w', delete=False) as f:
-        ...     temp_path = f.name
-        >>> cam.save_ini(temp_path)
-        >>> config = configparser.ConfigParser()
-        >>> _ = config.read(temp_path)
-        >>> os.remove(temp_path)
-        >>> config["Extrinsics"]["T2"]
-        '-2.0'
-        """
-        config = configparser.ConfigParser()
-        if save_extrinsics:
-            config["Extrinsics"] = {}
-            for row in range(3):
-                for col in range(3):
-                    config["Extrinsics"][f"R{row + 1}{col + 1}"] = str(
-                        self.rotation[row, col].item())
-            for row in range(3):
-                config["Extrinsics"][f"T{row + 1}"] = str(
-                    self.translation[row].item())
-        f = self.intrinsic[0, 0].item()
-        config["Intrinsics"] = {
-            "f": str(-f),
-            "mu": str(1.0),
-            "mv": str(self.intrinsic[1, 1].item() / f),
-            "u0": str(self.intrinsic[0, 2].item()),
-            "v0": str(self.intrinsic[1, 2].item()),
-        }
-        config["Distortion=pinhole"] = {
-            n: str(self.distortion[i].item())
-            for i, n in enumerate(["k1", "k2", "p1", "p2", "k3"])
-        }
-        with open(path, "w") as file:
-            config.write(file)
-
     def project_pinhole(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane.
@@ -134,11 +93,12 @@ class Camera:
         >>> cam.project_pinhole(pts).tolist()
         [0.5, 0.5]
         """
-        points_cam = (self.rotation @ (points - self.translation).unsqueeze(-1)) \
-            .squeeze(-1)
+        *Bs, M = points.shape
+        points_cam = (self.rotation @ points.view(-1, 3, 1)).squeeze(-1) \
+            + self.translation
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
         z = torch.clamp(z, min=eps)
-        return xy / z
+        return (xy / z).view(*Bs, M//3*2)
 
     def distortion_params(self, xy_norm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -191,7 +151,7 @@ class Camera:
         """
         return self.distort_points(self.project_pinhole(points, eps))
 
-    def undistort_points(self, points: torch.Tensor, num_iters: int = 5) -> torch.Tensor:
+    def undistort_points(self, points: torch.Tensor, num_iters: int = 10) -> torch.Tensor:
         """
         Undistort a set of 2d points on the cameras image plane from pixel space
         to normalized camera coordinates. The result space matches the output
@@ -206,8 +166,7 @@ class Camera:
         *Bs, M = points.shape
         xy = torch.linalg.solve(
             self.intrinsic[0:2, 0:2],
-            (points.view(*Bs, M // 2, 2) -
-             self.intrinsic[0:2, 2]).unsqueeze(-1)
+            (points.view(-1, 2) - self.intrinsic[0:2, 2]).unsqueeze(-1)
         ).squeeze(-1)
         xy_norm = xy.clone()
         for _ in range(num_iters):
@@ -284,7 +243,6 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], cova
     vec = []
     for cam, pts, cov in zip(cams, points, covars or [None for _ in range(len(cams))]):
         r, t = cam.rotation, cam.translation
-        t = -cam.rotation @ cam.translation
         A = r[0:2] - pts.unsqueeze(-1) * r[2]
         b = (pts * t[2] - t[0:2]).unsqueeze(-1)
         if cov is None:
