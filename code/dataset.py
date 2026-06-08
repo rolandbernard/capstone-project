@@ -1,11 +1,13 @@
 
 import os
 import io
+import json
 import zipfile
 import tarfile
 import urllib.request
 
 import gdown
+import torch
 
 import source
 from camera import Camera
@@ -54,6 +56,7 @@ class SalsaDataset:
     """
 
     fps = 15
+    scenes: list[str] = ["PosterSession", "CocktailParty"]
 
     def __init__(self, path: str = "./data/salsa"):
         """
@@ -139,6 +142,10 @@ class D3pwDataset:
         """
         self.path = path
 
+    @property
+    def scenes(self) -> list[str]:
+        return os.listdir(f"{self.path}/imageFiles")
+
     def download(self):
         """
         Download the dataset from official source. Download is skipped if already present.
@@ -148,6 +155,13 @@ class D3pwDataset:
             download_zip(self.path, f"{self.endpoint}/imageFiles.zip")
         if not os.path.exists(f"{self.path}/sequenceFiles"):
             download_zip(self.path, f"{self.endpoint}/sequenceFiles.zip")
+
+    def extract_scene_yolo_dataset(self, scene: str, path: str):
+        pass
+
+    def extract_yolo_dataset(self, path: str = "./data/yolo"):
+        for scene in self.scenes:
+            self.extract_scene_yolo_dataset(scene, path)
 
 
 class CmuPanopticDataset:
@@ -181,6 +195,15 @@ class CmuPanopticDataset:
         "160906_ian2", "160906_ian1", "160401_ian3", "160401_ian2", "160401_ian1",
         "170915_office1", "170407_office2", "160906_pizza1", "161029_tools1",
         "161029_build1", "161029_sports1",
+    ]
+    val_scenes: list[str] = [
+        '171204_pose5', '171026_pose2', '170221_haggling_m2', '170224_haggling_b2',
+        '170228_haggling_b2', '170404_haggling_b2', '161029_piano3',
+    ]
+    test_scenes: list[str] = [
+        "171204_pose6", "171026_pose3", "170221_haggling_m3", "170224_haggling_b3",
+        "170228_haggling_b3", "170404_haggling_b3", "170407_haggling_b3", "161029_piano4",
+        "161202_haggling1", "170915_office1", "161029_build1"
     ]
     vga_panels = [
         1, 19, 14, 6, 16, 9, 5, 10, 18, 15, 3, 8, 4, 20, 11, 13, 7, 2, 17, 12, 9, 5, 6, 3, 15, 2, 12, 14, 16, 10, 4, 13, 20, 8, 17, 19,
@@ -243,6 +266,21 @@ class CmuPanopticDataset:
                 download_file(f"{self.path}/{name}/{filename}",
                               f"{self.endpoint}/{name}/videos/vga_shared_crf10/{filename}")
 
+    def is_valid_scene(self, name: str, vga_gt=True, hd_gt=False, vga=True, hd=False) -> bool:
+        """
+        Determine whether for the given scene we have the desired data. Some
+        scenes in the CMU Panoptic dataset don"t contain some or all of the data.
+        """
+        if vga_gt and not os.path.exists(f"{self.path}/{name}/vgaPose3d_stage1_coco19"):
+            return False
+        if hd_gt and not os.path.exists(f"{self.path}/{name}/hdPose3d_stage1_coco19"):
+            return False
+        if vga and not os.path.exists(f"{self.path}/{name}/vga_01_01.mp4"):
+            return False
+        if hd and not os.path.exists(f"{self.path}/{name}/hd_00_00.mp4"):
+            return False
+        return True
+
     def download(self, num_hd_cams: int = 0, num_vga_cams: int = 4):
         """
         Download the dataset from official source. Download is skipped if already present.
@@ -250,3 +288,34 @@ class CmuPanopticDataset:
         os.makedirs(self.path, exist_ok=True)
         for scene in self.scenes:
             self.download_scene(scene, num_hd_cams, num_vga_cams)
+
+    def get_source(self, name: str, num_hd_cams: int = 0, num_vga_cams: int = 4) -> source.VideoSource:
+        """
+        Load one of the scenes from the dataset into a video source for further
+        processing. The name should be one of the ones in `CmuPanopticDataset.scenes`.
+        """
+        with open(f"{self.path}/{name}/calibration.json") as f:
+            calib = json.load(f)
+        streams = []
+        cameras = []
+        for i in range(num_hd_cams):
+            name = f"00_{i:02d}"
+            streams.append(f"{self.path}/{name}/hd_{name}.mp4")
+            cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
+            cameras.append(Camera(
+                rotation=torch.tensor(cam_calib["R"]),
+                translation=torch.tensor(cam_calib["t"]).squeeze(-1),
+                intrinsic=torch.tensor(cam_calib["K"]),
+                distortion=torch.tensor(cam_calib["distCoef"]),
+            ))
+        for i in range(num_vga_cams):
+            name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
+            streams.append(f"{self.path}/{name}/vga_{name}.mp4")
+            cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
+            cameras.append(Camera(
+                rotation=torch.tensor(cam_calib["R"]),
+                translation=torch.tensor(cam_calib["t"]).squeeze(-1),
+                intrinsic=torch.tensor(cam_calib["K"]),
+                distortion=torch.tensor(cam_calib["distCoef"]),
+            ))
+        return source.OfflineVideoSource(streams, cameras)

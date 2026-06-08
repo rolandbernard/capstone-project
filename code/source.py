@@ -71,6 +71,7 @@ class OfflineVideoSource(VideoSource):
             cap.release()
 
     def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], list[Camera]]:
+        device = self.cameras[0].intrinsic.device
         frames = []
         for cap in self.caps:
             if not cap.isOpened():
@@ -79,9 +80,16 @@ class OfflineVideoSource(VideoSource):
             if not success:
                 return None, None, None
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(torch.from_numpy(frame))
+            frames.append(torch.tensor(frame, device=device))
         timestamp = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
         return timestamp, frames, self.cameras
+
+    def to(self, *args, **kargs):
+        """
+        Apply the PyTorch `.to` method to all contained cameras.
+        """
+        self.cameras = [cam.to(*args, **kargs) for cam in self.cameras]
+        return self
 
 
 class ThreadedVideoStream:
@@ -159,6 +167,7 @@ class OnlineVideoSource(VideoSource):
             stream.release()
 
     def next_frames(self) -> tuple[None, None, None] | tuple[float, list[torch.Tensor], list[Camera]]:
+        device = self.cameras[0].intrinsic.device
         frames = []
         timestamps = []
         for cap in self.streams:
@@ -166,6 +175,13 @@ class OnlineVideoSource(VideoSource):
             if timestamp is None or frame is None:
                 return None, None, None
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(torch.from_numpy(frame))
+            frames.append(torch.tensor(frame, device=device))
             timestamps.append(timestamp)
         return float(np.median(timestamps)), frames, self.cameras
+
+    def to(self, *args, **kargs):
+        """
+        Apply the PyTorch `.to` method to all contained cameras.
+        """
+        self.cameras = [cam.to(*args, **kargs) for cam in self.cameras]
+        return self
