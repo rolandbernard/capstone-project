@@ -6,6 +6,7 @@ from ultralytics.nn.tasks import PoseModel
 from ultralytics.nn.modules import Detect, Pose26, Conv
 
 from camera import Camera
+from util import NetStorage
 
 
 class PoseDetector:
@@ -120,11 +121,6 @@ class CustomPose(Pose26):
                 kpts_head[i](features[i]).view(bs, self.nk, -1)
                 for i in range(self.nl)
             ], dim=2)
-            if self.training:
-                preds["kpts_sigma"] = torch.cat([
-                    kpts_sigma_head[i](features[i]).view(bs, self.nk_sigma, -1)
-                    for i in range(self.nl)
-                ], dim=2)
             preds["kpts_v2"] = torch.cat([
                 self.kpts_v2[i](features[i]).view(bs, self.nk_v2, -1)
                 for i in range(self.nl)
@@ -176,3 +172,84 @@ class CustomHeadedYolo(nn.Module):
 
     def forward(self, x):
         return self.base_net(x)
+
+
+def compute_loss(pred: torch.Tensor, gt: torch.Tensor, criterion):
+    raise NotImplementedError
+
+
+def train_epoch(model, loader, optimizer, criterion, scaler):
+    """
+    Perform a single training epoch. Also computes the average training loss
+    over the course of the epoch.
+    """
+    # Ensure we are in training mode.
+    model.train()
+    total_loss = 0
+    count = 0
+    for img, gts in loader:
+        img = img.to(model.device, non_blocking=True)
+        gts = gts.to(model.device, non_blocking=True)
+        optimizer.zero_grad(set_to_none=True)
+        with torch.autocast(model.device.type):
+            pred, _ = model(img)
+            loss = compute_loss(pred, gts, criterion)
+        scaler.scale(loss).backward()
+        nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+        scaler.step(optimizer)
+        scaler.update()
+        total_loss += loss.item()
+        count += 1
+    return total_loss / count
+
+
+def eval_epoch(model, loader, criterion):
+    """
+    Run a single evaluation round over the given loader. This is intended to be
+    used after each epoch to evaluate the performance on the validation set.
+    """
+    model.eval()
+    total_loss = 0
+    count = 0
+    # Disable gradients to save memory and compute.
+    with torch.inference_mode():
+        for x, y, ts, ts_y in loader:
+            x = x.to(model.device, non_blocking=True)
+            y = y.to(model.device, non_blocking=True)
+            ts = ts.to(model.device, non_blocking=True)
+            ts_y = ts_y.to(model.device, non_blocking=True)
+            with torch.autocast(model.device.type):
+                logits = model(x, ts, ts_y)
+                loss = compute_loss(logits, y, criterion)
+            total_loss += loss.item()
+            count += 1
+    return total_loss / count
+
+
+def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
+    """
+    Perform a multiple training epochs, recoding the history of both training
+    and validation loss in the given log directory. This will train using the
+    saved optimizer, model, and learning rate schedule from the provided net
+    storage. Uses pixel-wise cross-entropy as the loss.
+    """
+    # Lower precision to benefit from certain hardware support.
+    torch.set_float32_matmul_precision('high')
+    model = nets.net
+    optimizer = nets.optimizer
+    scheduler = nets.scheduler
+    scaler = torch.GradScaler(device=model.device.type)
+    criterion = nn.MSELoss()
+    for epoch in range(nets.step + 1, num_epochs):
+        tr_loss = train_epoch(model, train, optimizer, criterion, scaler)
+        val_loss = eval_epoch(model, val, criterion)
+        nets.save_network(epoch, {
+            "tr_loss": tr_loss, "val_loss": val_loss,
+        }, model, optimizer, scheduler)
+        scheduler.step(val_loss)
+        print(f"epoch {epoch}; train: loss {tr_loss}; val: loss {val_loss}")
+        if callback is not None and callback(val_loss, epoch):
+            print("stopping via callback")
+            break
+    else:
+        print("max epoch reached")

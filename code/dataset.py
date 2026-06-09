@@ -359,6 +359,10 @@ class CmuPanopticDataset:
                 cap.release()
 
     def extract_yolo_dataset(self, path: str = "./data/yolo"):
+        """
+        Extract from the dataset a set of images and annotations that can be used
+        to train the custom YOLO26 based pose estimation model.
+        """
         os.makedirs(f"{path}/train", exist_ok=True)
         os.makedirs(f"{path}/val", exist_ok=True)
         for scene in self.scenes:
@@ -367,3 +371,26 @@ class CmuPanopticDataset:
                     self.extract_scene_yolo_dataset(scene, f"{path}/val")
                 else:
                     self.extract_scene_yolo_dataset(scene, f"{path}/train")
+
+    def extract_scene_kalman_dataset(self, scene: str, path: str, ith: int = 25):
+        scene_path = f"{self.path}/{scene}"
+        vga_ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
+        if os.path.exists(vga_ann_path):
+            raise NotImplementedError
+        hd_ann_path = f"{scene_path}/hdPose3d_stage1_coco19"
+        if os.path.exists(hd_ann_path):
+            raise NotImplementedError
+
+    def extract_kalman_dataset(self, path: str = "./data/kalman"):
+        """
+        Extract from the dataset a set of single person tracks that can be used
+        for learning the Kalman filter parameters from real data.
+        """
+        os.makedirs(f"{path}/train", exist_ok=True)
+        os.makedirs(f"{path}/val", exist_ok=True)
+        for scene in self.scenes:
+            if scene not in self.test_scenes:
+                if scene in self.val_scenes:
+                    self.extract_scene_kalman_dataset(scene, f"{path}/val")
+                else:
+                    self.extract_scene_kalman_dataset(scene, f"{path}/train")
