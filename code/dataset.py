@@ -317,7 +317,7 @@ class CmuPanopticDataset:
             cameras.append(self.load_cam(calib, name))
         return source.OfflineVideoSource(streams, cameras)
 
-    def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 50):
+    def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 25):
         scene_path = f"{self.path}/{scene}"
         ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
         videos = [f for f in os.listdir(scene_path)

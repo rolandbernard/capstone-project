@@ -1,7 +1,9 @@
 
 import torch
+import torch.nn as nn
 from ultralytics import YOLO
 from ultralytics.nn.tasks import PoseModel
+from ultralytics.nn.modules import Detect, Pose26, Conv
 
 from camera import Camera
 
@@ -84,3 +86,93 @@ class PoseDetector:
         """
         self.model = self.model.to(*args, **kargs)
         return self
+
+
+class CustomPose(Pose26):
+    """
+    A custom head for the YOLO26 model that is trained to natively output mean
+    and covariance for each keypoint position instead of visibility value. The
+    original head is kept.
+    """
+
+    def __init__(self, nc: int = 1, kpt_shape: tuple = (17, 3), reg_max=16, end2end=True, ch: tuple = ()):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        c4 = max(ch[0] // 4, kpt_shape[0] * (kpt_shape[1] + 2))
+        self.nk_v2 = kpt_shape[0]*5
+        self.kpts_v2 = nn.ModuleList(
+            nn.Sequential(Conv(c4, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk_v2, 1)) for _ in ch)
+
+    def forward_head(
+        self,
+        x: list[torch.Tensor],
+        box_head: nn.Module,
+        cls_head: nn.Module,
+        pose_head: nn.ModuleList,
+        kpts_head: nn.ModuleList,
+        kpts_sigma_head: nn.ModuleList,
+    ) -> dict[str, torch.Tensor]:
+        """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
+        preds = Detect.forward_head(self, x, box_head, cls_head)
+        if pose_head is not None:
+            bs = x[0].shape[0]  # batch size
+            features = [pose_head[i](x[i]) for i in range(self.nl)]
+            preds["kpts"] = torch.cat([
+                kpts_head[i](features[i]).view(bs, self.nk, -1)
+                for i in range(self.nl)
+            ], dim=2)
+            if self.training:
+                preds["kpts_sigma"] = torch.cat([
+                    kpts_sigma_head[i](features[i]).view(bs, self.nk_sigma, -1)
+                    for i in range(self.nl)
+                ], dim=2)
+            preds["kpts_v2"] = torch.cat([
+                self.kpts_v2[i](features[i]).view(bs, self.nk_v2, -1)
+                for i in range(self.nl)
+            ], dim=2)
+        return preds
+
+    def _inference(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Decode predicted bounding boxes and class probabilities, concatenated with keypoints."""
+        preds = super()._inference(x)
+        return torch.cat([preds, self.kpts_v2_decode(x["kpts_v2"])], dim=1)
+
+    def kpts_v2_decode(self, kpts: torch.Tensor) -> torch.Tensor:
+        """Decode keypoints from predictions."""
+        bs = kpts.shape[0]
+        y = kpts.view(bs, self.kpt_shape[0], 5, -1)
+        return torch.stack([
+            (y[:, :, 0] + self.anchors[0]) * self.strides,
+            (y[:, :, 1] + self.anchors[1]) * self.strides,
+            y[:, :, 2] * self.strides,
+            y[:, :, 3] * self.strides,
+            y[:, :, 4] * self.strides,
+        ], dim=2).view(bs, self.nk_v2, -1)
+
+
+class CustomHeadedYolo(nn.Module):
+    """
+    Small wrapper to install the custom pose head at the end of a standard YOLO26
+    human pose estimation model.
+    """
+
+    def __init__(self, original_model: str | PoseModel = "yolo26n-pose", path: str = "./nets"):
+        super().__init__()
+        if isinstance(original_model, str):
+            original_model = YOLO(
+                f"{path}/{model_name}.pt").model  # type: ignore
+        self.base_net: PoseModel = original_model  # type: ignore
+        old_head = self.base_net.model[-1]
+        old_state_dict = old_head.state_dict()
+        self.extra_head = CustomPose()
+        self.extra_head.load_state_dict(old_state_dict, strict=False)
+        self.base_net.model[-1] = self.extra_head
+
+    def extra_parameters(self):
+        """
+        Get the extra parameters that have been added by the custom head. During
+        training we will be freezing all other parameters.
+        """
+        return self.extra_head.kpts_v2.parameters()
+
+    def forward(self, x):
+        return self.base_net(x)
