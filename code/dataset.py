@@ -2,10 +2,13 @@
 import os
 import io
 import json
+import random
 import zipfile
 import tarfile
 import urllib.request
+from itertools import count
 
+import cv2
 import gdown
 import torch
 
@@ -156,13 +159,6 @@ class D3pwDataset:
         if not os.path.exists(f"{self.path}/sequenceFiles"):
             download_zip(self.path, f"{self.endpoint}/sequenceFiles.zip")
 
-    def extract_scene_yolo_dataset(self, scene: str, path: str):
-        pass
-
-    def extract_yolo_dataset(self, path: str = "./data/yolo"):
-        for scene in self.scenes:
-            self.extract_scene_yolo_dataset(scene, path)
-
 
 class CmuPanopticDataset:
     """
@@ -172,6 +168,8 @@ class CmuPanopticDataset:
     endpoint: str = "http://domedb.perception.cs.cmu.edu/webdata/dataset"
     hd_fps = 29.97
     vga_fps = 25
+    coco17_indices = [1, 15, 17, 16, 18, 3, 9, 4,
+                      10, 5, 11, 6, 12, 7, 13, 8, 14]
     scenes: list[str] = [
         "171204_pose1", "171204_pose2", "171204_pose3", "171204_pose4", "171204_pose5",
         "171204_pose6", "171026_pose1", "171026_pose2", "171026_pose3",
@@ -271,6 +269,8 @@ class CmuPanopticDataset:
         Determine whether for the given scene we have the desired data. Some
         scenes in the CMU Panoptic dataset don"t contain some or all of the data.
         """
+        if not os.path.exists(f"{self.path}/{name}/calibration.json"):
+            return False
         if vga_gt and not os.path.exists(f"{self.path}/{name}/vgaPose3d_stage1_coco19"):
             return False
         if hd_gt and not os.path.exists(f"{self.path}/{name}/hdPose3d_stage1_coco19"):
@@ -281,13 +281,22 @@ class CmuPanopticDataset:
             return False
         return True
 
-    def download(self, num_hd_cams: int = 0, num_vga_cams: int = 4):
+    def download(self, num_hd_cams: int = 0, num_vga_cams: int = 4, scenes: None | list[str] = None):
         """
         Download the dataset from official source. Download is skipped if already present.
         """
         os.makedirs(self.path, exist_ok=True)
-        for scene in self.scenes:
+        for scene in scenes or self.scenes:
             self.download_scene(scene, num_hd_cams, num_vga_cams)
+
+    def load_cam(self, calib, name: str) -> Camera:
+        cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
+        return Camera(
+            rotation=torch.tensor(cam_calib["R"]),
+            translation=torch.tensor(cam_calib["t"]).squeeze(-1),
+            intrinsic=torch.tensor(cam_calib["K"]),
+            distortion=torch.tensor(cam_calib["distCoef"]),
+        )
 
     def get_source(self, name: str, num_hd_cams: int = 0, num_vga_cams: int = 4) -> source.VideoSource:
         """
@@ -301,21 +310,60 @@ class CmuPanopticDataset:
         for i in range(num_hd_cams):
             name = f"00_{i:02d}"
             streams.append(f"{self.path}/{name}/hd_{name}.mp4")
-            cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
-            cameras.append(Camera(
-                rotation=torch.tensor(cam_calib["R"]),
-                translation=torch.tensor(cam_calib["t"]).squeeze(-1),
-                intrinsic=torch.tensor(cam_calib["K"]),
-                distortion=torch.tensor(cam_calib["distCoef"]),
-            ))
+            cameras.append(self.load_cam(calib, name))
         for i in range(num_vga_cams):
             name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
             streams.append(f"{self.path}/{name}/vga_{name}.mp4")
-            cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
-            cameras.append(Camera(
-                rotation=torch.tensor(cam_calib["R"]),
-                translation=torch.tensor(cam_calib["t"]).squeeze(-1),
-                intrinsic=torch.tensor(cam_calib["K"]),
-                distortion=torch.tensor(cam_calib["distCoef"]),
-            ))
+            cameras.append(self.load_cam(calib, name))
         return source.OfflineVideoSource(streams, cameras)
+
+    def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 50):
+        scene_path = f"{self.path}/{scene}"
+        ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
+        videos = [f for f in os.listdir(scene_path)
+                  if f.startswith("vga_") and f.endswith(".mp4")]
+        with open(f"{scene_path}/calibration.json") as f:
+            calib = json.load(f)
+        cams = [self.load_cam(calib, v[4:-4]) for v in videos]
+        caps = [cv2.VideoCapture(f"{scene_path}/{v}") for v in videos]
+        try:
+            for i in count():
+                frames = []
+                for cap in caps:
+                    ret, frame = cap.read()
+                    if not ret:
+                        return
+                    frames.append(frame)
+                if i % ith == 0 and os.path.exists(f"{ann_path}/body3DScene_{i:08d}.json"):
+                    with open(f"{ann_path}/body3DScene_{i:08d}.json") as f:
+                        ann = json.load(f)
+                    if len(ann["bodies"]) > 0:
+                        idx = random.randint(0, len(frames) - 1)
+                        cv2.imwrite(f"{path}/{scene}_{i}.jpg", frames[idx])
+                        with open(f"{path}/{scene}_{i}.json", "w") as f:
+                            json.dump([
+                                {
+                                    "id": b["id"],
+                                    "kpts": torch.concat([
+                                        cams[idx].project(
+                                            torch.tensor(b["joints19"])
+                                            .view(19, 4)[self.coco17_indices, :3]
+                                        ),
+                                        torch.tensor(b["joints19"])
+                                        .view(19, 4)[self.coco17_indices, 3:4]
+                                    ], dim=1).tolist(),
+                                } for b in ann["bodies"]
+                            ], f)
+        finally:
+            for cap in caps:
+                cap.release()
+
+    def extract_yolo_dataset(self, path: str = "./data/yolo"):
+        os.makedirs(f"{path}/train", exist_ok=True)
+        os.makedirs(f"{path}/val", exist_ok=True)
+        for scene in self.scenes:
+            if scene not in self.test_scenes and self.is_valid_scene(scene):
+                if scene in self.val_scenes:
+                    self.extract_scene_yolo_dataset(scene, f"{path}/val")
+                else:
+                    self.extract_scene_yolo_dataset(scene, f"{path}/train")
