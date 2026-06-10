@@ -419,6 +419,7 @@ class YoloDataset(Dataset):
         img = img.permute(2, 0, 1)
         img = img.to(torch.float32) / 255.0
         with open(f"{self.root_dir}/{img_file[:-4]}.json") as f:
-            ann = json.load(f)
-        ann = torch.tensor([b["kpts"] for b in ann])
+            an = json.load(f)[:10]
+        ann = torch.zeros(10, 17, 3)
+        ann[:len(an)] = torch.tensor([b["kpts"] for b in an])  # type: ignore
         return img, ann

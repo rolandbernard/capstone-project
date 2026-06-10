@@ -1,10 +1,16 @@
 
+import os
+
 import torch
 import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
 from ultralytics import YOLO
 from ultralytics.nn.tasks import PoseModel
 from ultralytics.nn.modules import Detect, Pose26, Conv
 
+import util
+import dataset
 from camera import Camera
 from util import NetStorage
 
@@ -96,7 +102,7 @@ class CustomPose(Pose26):
     original head is kept.
     """
 
-    def __init__(self, nc: int = 1, kpt_shape: tuple = (17, 3), reg_max=16, end2end=True, ch: tuple = ()):
+    def __init__(self, nc: int = 1, kpt_shape: tuple = (17, 3), reg_max=1, end2end=True, ch: tuple = (64, 128, 256)):
         super().__init__(nc, kpt_shape, reg_max, end2end, ch)
         c4 = max(ch[0] // 4, kpt_shape[0] * (kpt_shape[1] + 2))
         self.nk_v2 = kpt_shape[0]*5
@@ -155,13 +161,19 @@ class CustomHeadedYolo(nn.Module):
         super().__init__()
         if isinstance(original_model, str):
             original_model = YOLO(
-                f"{path}/{model_name}.pt").model  # type: ignore
+                f"{path}/{original_model}.pt").model  # type: ignore
         self.base_net: PoseModel = original_model  # type: ignore
         old_head = self.base_net.model[-1]
         old_state_dict = old_head.state_dict()
         self.extra_head = CustomPose()
+        self.extra_head.f = old_head.f
+        self.extra_head.fuse()
         self.extra_head.load_state_dict(old_state_dict, strict=False)
         self.base_net.model[-1] = self.extra_head
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
 
     def extra_parameters(self):
         """
@@ -253,3 +265,47 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
             break
     else:
         print("max epoch reached")
+
+
+def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, compile=True):
+    """
+    Initialize or load the net storage from the specified directories. This
+    function will take the necessary parameters from the supplied configuration.
+    """
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.extra_parameters():
+        param.requires_grad = True
+    optimizer = optim.AdamW(model.extra_parameters(),
+                            lr=1e-3, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6)
+    return NetStorage(nets_dir, stat_dir, model, optimizer, scheduler, compile)
+
+
+def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, testing=False, callback=None):
+    """
+    Perform a multiple training epochs. This will initialize the net storage in
+    case we are starting a fresh run, and resume the existing run otherwise. The
+    optimizer and learning rate schedule will be initializer according to the
+    passed configuration. The test and train split are generated.
+    """
+    util.set_seed(42)
+    nets = net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE))
+    full_train = dataset.YoloDataset(
+        f"{os.path.dirname(__file__)}/data/yolo/train")
+    if testing:
+        # This configuration is only for the sanity check, it is not used for the
+        # actual training of the models.
+        train = torch.utils.data.Subset(full_train, range(20))
+        val = train
+    else:
+        train = full_train
+        val = dataset.YoloDataset(f"{os.path.dirname(__file__)}/data/yolo/val")
+    train_loader = DataLoader(
+        train, 32, shuffle=True, drop_last=True, num_workers=8,
+        persistent_workers=True, pin_memory=True, prefetch_factor=4)
+    val_loader = DataLoader(
+        val, 32, shuffle=True, drop_last=True, num_workers=8,
+        persistent_workers=True, pin_memory=True, prefetch_factor=4)
+    train_epochs(nets, train_loader, val_loader, num_epochs, callback)

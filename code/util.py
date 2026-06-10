@@ -3,7 +3,6 @@ import os
 import random
 
 import torch
-import torch.optim as optim
 import numpy as np
 import pandas as pd
 
@@ -112,17 +111,6 @@ class NetStorage:
                         state[k] = v.to(self.net.device)
             sched = torch.load(f"{self.nets_dir}/{step}.sched")
             self.scheduler.load_state_dict(sched)
-
-
-def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, compile=True):
-    """
-    Initialize or load the net storage from the specified directories. This
-    function will take the necessary parameters from the supplied configuration.
-    """
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6)
-    return NetStorage(nets_dir, stat_dir, model, optimizer, scheduler, compile)
 
 
 def count_model_params(model):
