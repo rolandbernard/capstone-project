@@ -60,25 +60,38 @@ class SkeletonPlayer:
         self.pl.add_mesh(ground, style="wireframe", color="lightgray")
 
     def setup_cameras(self):
-        for cam in self.cameras:
+        scale = 0.5 
+        for cid, cam in enumerate(self.cameras):
             R = cam.rotation.cpu().numpy()
-            T = cam.translation.cpu().numpy()
-            T = T.flatten()
-            camera_center = T
-            dir_x = R[0, :]
-            dir_y = R[1, :]
-            dir_z = R[2, :] # viewing direction
-            # Camera center as sphere.
-            camera_sphere = pv.Sphere(radius=0.25, center=camera_center)
-            self.pl.add_mesh(camera_sphere, color="white")
-            self.pl.add_point_labels(
-                [camera_center], [f"Cam {cid}"], font_size=14,
-                text_color="black", show_points=False
-            )
-            # Camera axes as arrows.
-            self.pl.add_arrows(camera_center, dir_x, mag=1, color="red")
-            self.pl.add_arrows(camera_center, dir_y, mag=1, color="green")
-            self.pl.add_arrows(camera_center, dir_z, mag=1, color="blue")
+            T = cam.translation.cpu().numpy().flatten()
+            camera_center = -R.T @ T
+            K = cam.intrinsic.cpu().numpy()
+            fx = K[0, 0]
+            fy = K[1, 1]
+            cx = K[0, 2]
+            cy = K[1, 2]
+            width = cx * 2
+            height = cy * 2
+            z_cam = scale
+            x0 = (0 - cx) * z_cam / fx
+            x1 = (width - cx) * z_cam / fx
+            y0 = (0 - cy) * z_cam / fy
+            y1 = (height - cy) * z_cam / fy
+            corners_cam = np.array([
+                [x0, y0, z_cam],
+                [x1, y0, z_cam], 
+                [x1, y1, z_cam],  
+                [x0, y1, z_cam]  
+            ])
+            corners_world = (corners_cam @ R) + camera_center
+            vertices = np.vstack([camera_center, corners_world])
+            lines = np.array([
+                [2, 0, 1], [2, 0, 2], [2, 0, 3], [2, 0, 4],
+                [2, 1, 2], [2, 2, 3], [2, 3, 4], [2, 4, 1]
+            ]).flatten()
+            camera_wireframe = pv.PolyData(vertices, lines=lines)
+            self.pl.add_mesh(camera_wireframe, color="black", line_width=2)
+            self.pl.add_mesh(pv.Sphere(radius=scale * 0.05, center=camera_center), color="red")
 
     def get_or_create_track(self, track_id):
         if track_id not in self.track_meshes:
@@ -164,14 +177,14 @@ class SkeletonPlayer:
 
 
 if __name__ == "__main__":
-    frames = []
-    for i in range(1, 1500):
-        with open(f"code/data/demo/{i}.json", "r") as f:
-            tracks = json.load(f)
-        frames.append([
-            Track(track["id"], track["kpts"], track["covs"])
-            for track in tracks
-        ])
+    frames = [[]]
+    # for i in range(1, 1500):
+    #     with open(f"code/data/demo/{i}.json", "r") as f:
+    #         tracks = json.load(f)
+    #     frames.append([
+    #         Track(track["id"], track["kpts"], track["covs"])
+    #         for track in tracks
+    #     ])
     cameras = []
     for cid in range(4):
         cam = Camera()

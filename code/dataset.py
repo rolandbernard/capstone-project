@@ -11,6 +11,7 @@ from itertools import count
 import cv2
 import gdown
 import torch
+from torch.utils.data import Dataset
 
 import source
 from camera import Camera
@@ -394,3 +395,30 @@ class CmuPanopticDataset:
                     self.extract_scene_kalman_dataset(scene, f"{path}/val")
                 else:
                     self.extract_scene_kalman_dataset(scene, f"{path}/train")
+
+
+class YoloDataset(Dataset):
+    """
+    Dataset yielding the individual frames from the yolo dataset extracted from
+    the CMU Panoptic sequences. It loads both the image and 
+    """
+
+    def __init__(self, root_dir: str = "./data/yolo/train"):
+        self.root_dir = root_dir
+        self.files = sorted(
+            (f for f in os.listdir(root_dir) if f.endswith(".jpg")))
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        img_file = self.files[idx]
+        img = cv2.imread(f"{self.root_dir}/{img_file}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # type: ignore
+        img = torch.from_numpy(img)
+        img = img.permute(2, 0, 1)
+        img = img.to(torch.float32) / 255.0
+        with open(f"{self.root_dir}/{img_file[:-4]}.json") as f:
+            ann = json.load(f)
+        ann = torch.tensor([b["kpts"] for b in ann])
+        return img, ann
