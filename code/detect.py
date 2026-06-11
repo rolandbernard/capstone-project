@@ -187,16 +187,38 @@ class CustomHeadedYolo(nn.Module):
         ], dim=2).view(bs, 17, 5, -1)
         pred["kpts_extra"] = torch.concat([
             (extra[:, :, 0:2] + self.anchors) * self.strides,
-            extra[:, :, 2:5] * self.strides,
+            torch.exp(extra[:, :, 2:4]) * self.strides,
+            extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
 
 
-def compute_nll(pred: torch.Tensor, gt: torch.Tensor):
-    pass
+def compute_nll(pred: torch.Tensor, gt: torch.Tensor, eps=1e-8) -> torch.Tensor:
+    """
+    Computes the weighted negative log likelihood loss for 2D Gaussian in the
+    predictions against the ground truth.
+    """
+    mu, a, b, c = pred[..., :2], pred[..., 2], pred[..., 3], pred[..., 4]
+    gt_xy, w = gt[..., :2], gt[..., 2]
+    L = torch.stack([
+        torch.stack([a, torch.zeros_like(a)], dim=-1),
+        torch.stack([c, b], dim=-1)
+    ], dim=-2)
+    logdet = 2.0 * (torch.log(a + eps) + torch.log(b + eps))
+    diff = (gt_xy - mu).unsqueeze(-1)
+    v = torch.linalg.solve_triangular(L, diff, upper=False)
+    mahalanobis = v.mT @ v
+    nll = logdet + mahalanobis
+    weighted_nll = nll * w
+    return torch.mean(weighted_nll)
 
 
-def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0):
+def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0, eps=1e-8):
+    """
+    Compute the loss between the predictions and the ground truth. First, match
+    the detections against the known ground truth and then compute the negative
+    log likelihood over the resulting matches.
+    """
     bs = gt.shape[0]
     anchors, strides = model.anchors, model.strides
     valid_mask = pred["one2one"]["scores"].detach() > threshold
@@ -217,7 +239,7 @@ def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0):
         weight = torch.sigmoid(b_kpts[:, :, 2]).unsqueeze(1) \
             * b_gt[:, :, 2].unsqueeze(0)
         cost_matrix = torch.sum(torch.sum(dist_matrix, dim=-1) * weight, dim=-1) \
-            / (torch.sum(weight, dim=-1) + 1e-5)
+            / (torch.sum(weight, dim=-1) + eps)
         # 6. Hungarian Matching (Push to CPU only for the solver)
         cost_np = cost_matrix.cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
@@ -227,7 +249,7 @@ def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0):
         gts.append(b_gt[col_idx])
     if len(preds) == 0:
         return torch.tensor(0.0, device=gt.device, requires_grad=True)
-    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0))
+    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), eps)
 
 
 def train_epoch(model, loader, optimizer, scaler):
