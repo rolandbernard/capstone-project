@@ -266,7 +266,7 @@ def train_epoch(model, loader, optimizer, scaler):
         gts = gts.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(model.device.type):
-            _, pred = model(img)
+            pred = model(img)
             loss = compute_loss(pred, gts, model)
         scaler.scale(loss).backward()
         nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
@@ -291,7 +291,7 @@ def eval_epoch(model, loader):
             img = img.to(model.device, non_blocking=True)
             gts = gts.to(model.device, non_blocking=True)
             with torch.autocast(model.device.type):
-                _, pred = model(img)
+                pred = model(img)
                 loss = compute_loss(pred, gts, model)
             total_loss += loss.item()
             count += 1
@@ -356,7 +356,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     if testing:
         # This configuration is only for the sanity check, it is not used for the
         # actual training of the models.
-        train = torch.utils.data.Subset(full_train, range(20))
+        train = torch.utils.data.Subset(full_train, range(32))
         val = train
     else:
         train = full_train
