@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from ultralytics import YOLO
 from ultralytics.nn.tasks import PoseModel
 from ultralytics.nn.modules import Detect, Pose26, Conv
+import scipy.optimize
 
 import util
 import dataset
@@ -97,17 +98,13 @@ class PoseDetector:
 
 class CustomPose(Pose26):
     """
-    A custom head for the YOLO26 model that is trained to natively output mean
-    and covariance for each keypoint position instead of visibility value. The
-    original head is kept.
+    A custom head for the YOLO26 model that saves also the features of the pose
+    head so they can be reused later to train to natively output mean and covariance
+    for each keypoint position instead of visibility value. The original head is kept.
     """
 
     def __init__(self, nc: int = 1, kpt_shape: tuple = (17, 3), reg_max=1, end2end=True, ch: tuple = (64, 128, 256)):
         super().__init__(nc, kpt_shape, reg_max, end2end, ch)
-        c4 = max(ch[0] // 4, kpt_shape[0] * (kpt_shape[1] + 2))
-        self.nk_v2 = kpt_shape[0]*5
-        self.kpts_v2 = nn.ModuleList(
-            nn.Sequential(Conv(c4, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk_v2, 1)) for _ in ch)
 
     def forward_head(
         self,
@@ -121,34 +118,19 @@ class CustomPose(Pose26):
         """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
         preds = Detect.forward_head(self, x, box_head, cls_head)
         if pose_head is not None:
-            bs = x[0].shape[0]  # batch size
+            bs = x[0].shape[0]
             features = [pose_head[i](x[i]) for i in range(self.nl)]
+            preds["kpts_features"] = features  # type: ignore
             preds["kpts"] = torch.cat([
                 kpts_head[i](features[i]).view(bs, self.nk, -1)
                 for i in range(self.nl)
             ], dim=2)
-            preds["kpts_v2"] = torch.cat([
-                self.kpts_v2[i](features[i]).view(bs, self.nk_v2, -1)
-                for i in range(self.nl)
-            ], dim=2)
+            if self.training:
+                preds["kpts_sigma"] = torch.cat([
+                    kpts_sigma_head[i](features[i]).view(bs, self.nk_sigma, -1)
+                    for i in range(self.nl)
+                ], dim=2)
         return preds
-
-    def _inference(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
-        """Decode predicted bounding boxes and class probabilities, concatenated with keypoints."""
-        preds = super()._inference(x)
-        return torch.cat([preds, self.kpts_v2_decode(x["kpts_v2"])], dim=1)
-
-    def kpts_v2_decode(self, kpts: torch.Tensor) -> torch.Tensor:
-        """Decode keypoints from predictions."""
-        bs = kpts.shape[0]
-        y = kpts.view(bs, self.kpt_shape[0], 5, -1)
-        return torch.stack([
-            (y[:, :, 0] + self.anchors[0]) * self.strides,
-            (y[:, :, 1] + self.anchors[1]) * self.strides,
-            y[:, :, 2] * self.strides,
-            y[:, :, 3] * self.strides,
-            y[:, :, 4] * self.strides,
-        ], dim=2).view(bs, self.nk_v2, -1)
 
 
 class CustomHeadedYolo(nn.Module):
@@ -163,34 +145,92 @@ class CustomHeadedYolo(nn.Module):
             original_model = YOLO(
                 f"{path}/{original_model}.pt").model  # type: ignore
         self.base_net: PoseModel = original_model  # type: ignore
+        c4, nk = 85, 17*5
+        self.extra_head = nn.ModuleList(nn.Sequential(
+            Conv(c4, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, nk, 1)
+        ) for _ in range(3))
         old_head = self.base_net.model[-1]
         old_state_dict = old_head.state_dict()
-        self.extra_head = CustomPose()
-        self.extra_head.f = old_head.f
-        self.extra_head.fuse()
-        self.extra_head.load_state_dict(old_state_dict, strict=False)
-        self.base_net.model[-1] = self.extra_head
+        new_head = CustomPose()
+        new_head.fuse()
+        new_head.f, new_head.i = old_head.f, old_head.i
+        new_head.stride = old_head.stride
+        new_head.load_state_dict(old_state_dict, strict=False)
+        self.base_net.model[-1] = new_head
 
     @property
     def device(self):
         return next(self.parameters()).device
+
+    @property
+    def anchors(self):
+        return self.base_net.model[-1].anchors
+
+    @property
+    def strides(self):
+        return self.base_net.model[-1].strides
 
     def extra_parameters(self):
         """
         Get the extra parameters that have been added by the custom head. During
         training we will be freezing all other parameters.
         """
-        return self.extra_head.kpts_v2.parameters()
+        return self.extra_head.parameters()
 
     def forward(self, x):
-        return self.base_net(x)
+        self.base_net.eval()
+        bs = x.shape[0]
+        _, pred = self.base_net(x)
+        extra = torch.cat([
+            self.extra_head[i](features).view(bs, 17*5, -1)
+            for i, features in enumerate(pred["one2one"]["kpts_features"])
+        ], dim=2).view(bs, 17, 5, -1)
+        pred["kpts_extra"] = torch.concat([
+            (extra[:, :, 0:2] + self.anchors) * self.strides,
+            extra[:, :, 2:5] * self.strides,
+        ], dim=2).view(bs, 17*5, -1)
+        return pred
 
 
-def compute_loss(pred: torch.Tensor, gt: torch.Tensor, criterion):
-    raise NotImplementedError
+def compute_nll(pred: torch.Tensor, gt: torch.Tensor):
+    pass
 
 
-def train_epoch(model, loader, optimizer, criterion, scaler):
+def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0):
+    bs = gt.shape[0]
+    anchors, strides = model.anchors, model.strides
+    valid_mask = pred["one2one"]["scores"].detach() > threshold
+    all_kpts = pred["one2one"]["kpts"].detach().clone()
+    all_kpts = all_kpts.view(bs, 17, 3, -1)
+    all_kpts[:, :, :2] = (all_kpts[:, :, :2] + anchors) * strides
+    preds = []
+    gts = []
+    for b in range(bs):
+        valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
+        if len(valid_idx) == 0:
+            continue
+        b_kpts = all_kpts[b, :, :, valid_idx].permute(2, 0, 1)
+        b_gt = gt[b, torch.sum(gt[b, :, :, 2], dim=-1) > 0.01]
+        dist_matrix = b_kpts[:, :, :2].unsqueeze(1) \
+            - b_gt[:, :, :2].unsqueeze(0)
+        dist_matrix *= dist_matrix
+        weight = torch.sigmoid(b_kpts[:, :, 2]).unsqueeze(1) \
+            * b_gt[:, :, 2].unsqueeze(0)
+        cost_matrix = torch.sum(torch.sum(dist_matrix, dim=-1) * weight, dim=-1) \
+            / (torch.sum(weight, dim=-1) + 1e-5)
+        # 6. Hungarian Matching (Push to CPU only for the solver)
+        cost_np = cost_matrix.cpu().numpy()
+        row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
+        matched_pred_indices = valid_idx[row_idx]
+        preds.append(
+            pred["kpts_extra"][b, :, matched_pred_indices].view(17, 5, -1).permute(2, 0, 1))
+        gts.append(b_gt[col_idx])
+    if len(preds) == 0:
+        return torch.tensor(0.0, device=gt.device, requires_grad=True)
+    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0))
+
+
+def train_epoch(model, loader, optimizer, scaler):
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -204,8 +244,8 @@ def train_epoch(model, loader, optimizer, criterion, scaler):
         gts = gts.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(model.device.type):
-            pred, _ = model(img)
-            loss = compute_loss(pred, gts, criterion)
+            _, pred = model(img)
+            loss = compute_loss(pred, gts, model)
         scaler.scale(loss).backward()
         nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
         scaler.step(optimizer)
@@ -215,7 +255,7 @@ def train_epoch(model, loader, optimizer, criterion, scaler):
     return total_loss / count
 
 
-def eval_epoch(model, loader, criterion):
+def eval_epoch(model, loader):
     """
     Run a single evaluation round over the given loader. This is intended to be
     used after each epoch to evaluate the performance on the validation set.
@@ -225,14 +265,12 @@ def eval_epoch(model, loader, criterion):
     count = 0
     # Disable gradients to save memory and compute.
     with torch.inference_mode():
-        for x, y, ts, ts_y in loader:
-            x = x.to(model.device, non_blocking=True)
-            y = y.to(model.device, non_blocking=True)
-            ts = ts.to(model.device, non_blocking=True)
-            ts_y = ts_y.to(model.device, non_blocking=True)
+        for img, gts in loader:
+            img = img.to(model.device, non_blocking=True)
+            gts = gts.to(model.device, non_blocking=True)
             with torch.autocast(model.device.type):
-                logits = model(x, ts, ts_y)
-                loss = compute_loss(logits, y, criterion)
+                _, pred = model(img)
+                loss = compute_loss(pred, gts, model)
             total_loss += loss.item()
             count += 1
     return total_loss / count
@@ -251,10 +289,9 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
     optimizer = nets.optimizer
     scheduler = nets.scheduler
     scaler = torch.GradScaler(device=model.device.type)
-    criterion = nn.MSELoss()
     for epoch in range(nets.step + 1, num_epochs):
-        tr_loss = train_epoch(model, train, optimizer, criterion, scaler)
-        val_loss = eval_epoch(model, val, criterion)
+        tr_loss = train_epoch(model, train, optimizer, scaler)
+        val_loss = eval_epoch(model, val)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,
         }, model, optimizer, scheduler)
@@ -272,7 +309,7 @@ def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, compile=Tr
     Initialize or load the net storage from the specified directories. This
     function will take the necessary parameters from the supplied configuration.
     """
-    for param in model.parameters():
+    for param in model.base_net.parameters():
         param.requires_grad = False
     for param in model.extra_parameters():
         param.requires_grad = True
