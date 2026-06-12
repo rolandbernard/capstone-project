@@ -195,26 +195,17 @@ class CustomHeadedYolo(nn.Module):
             original_model = YOLO(
                 f"{path}/{original_model}.pt").model  # type: ignore
         self.base_net: PoseModel = original_model  # type: ignore
-        # Replace the final layer of the model.
-        old_head = self.base_net.model[-1]
-        old_state_dict = old_head.state_dict()
-        new_head = CustomPose()
-        new_head.fuse()
-        new_head.f, new_head.i = old_head.f, old_head.i
-        new_head.stride = old_head.stride
-        new_head.load_state_dict(old_state_dict, strict=False)
-        self.base_net.model[-1] = new_head
         # Freeze the base model.
         self.base_net.eval()
         for param in self.base_net.parameters():
             param.requires_grad = False
         # Create the extra head.
-        c4, nk = 85, 17*5
         self.extra_head = nn.ModuleList(nn.Sequential(
-            Conv(c4, c4*3//2, 3),
-            Conv(c4*3//2, c4*3//2, 3),
-            nn.Conv2d(c4*3//2, nk, 1)
-        ) for _ in range(3))
+            Conv(ch, 100, 3),
+            Conv(100, 100, 3),
+            Conv(100, 100, 3),
+            nn.Conv2d(100, 17*5, 1)
+        ) for ch in (64, 128, 256))
 
     @property
     def device(self):
@@ -247,17 +238,19 @@ class CustomHeadedYolo(nn.Module):
             _, pred = self.base_net(x)
         extra = torch.cat([
             self.extra_head[i](features).view(bs, 17*5, -1)
-            for i, features in enumerate(pred["one2one"]["kpts_features"])
+            for i, features in enumerate(pred["one2one"]["feats"])
         ], dim=2).view(bs, 17, 5, -1)
         pred["kpts_extra"] = torch.concat([
             (extra[:, :, 0:2] + self.anchors) * self.strides,
-            torch.exp(extra[:, :, 2:4]) * self.strides,
+            torch.exp(
+                torch.clamp(extra[:, :, 2:4], min=-4, max=6)
+            ) * self.strides,
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
 
 
-def compute_nll(pred: torch.Tensor, gt: torch.Tensor, eps=1e-8) -> torch.Tensor:
+def compute_nll(pred: torch.Tensor, gt: torch.Tensor, eps=1e-5) -> torch.Tensor:
     """
     Computes the weighted negative log likelihood loss for 2D Gaussian in the
     predictions against the ground truth.
@@ -274,10 +267,10 @@ def compute_nll(pred: torch.Tensor, gt: torch.Tensor, eps=1e-8) -> torch.Tensor:
     mahalanobis = v.mT @ v
     nll = logdet + mahalanobis
     weighted_nll = nll * w
-    return torch.mean(weighted_nll)
+    return torch.mean(weighted_nll) + 0.1 * torch.mean(diff*diff)
 
 
-def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0, eps=1e-8):
+def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0, eps=1e-5):
     """
     Compute the loss between the predictions and the ground truth. First, match
     the detections against the known ground truth and then compute the negative
@@ -316,7 +309,7 @@ def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0, eps=1e-8
     return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), eps)
 
 
-def train_epoch(model, loader, optimizer, scaler):
+def train_epoch(model, loader, optimizer):
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -329,13 +322,11 @@ def train_epoch(model, loader, optimizer, scaler):
         img = img.to(model.device, non_blocking=True)
         gts = gts.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        with torch.autocast(model.device.type):
-            pred = model(img)
-            loss = compute_loss(pred, gts, model)
-        scaler.scale(loss).backward()
+        pred = model(img)
+        loss = compute_loss(pred, gts, model)
+        loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
-        scaler.step(optimizer)
-        scaler.update()
+        optimizer.step()
         total_loss += loss.item()
         count += 1
     return total_loss / count
@@ -354,9 +345,8 @@ def eval_epoch(model, loader):
         for img, gts in loader:
             img = img.to(model.device, non_blocking=True)
             gts = gts.to(model.device, non_blocking=True)
-            with torch.autocast(model.device.type):
-                pred = model(img)
-                loss = compute_loss(pred, gts, model)
+            pred = model(img)
+            loss = compute_loss(pred, gts, model)
             total_loss += loss.item()
             count += 1
     return total_loss / count
@@ -374,9 +364,8 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
     model = nets.net
     optimizer = nets.optimizer
     scheduler = nets.scheduler
-    scaler = torch.GradScaler(device=model.device.type)
     for epoch in range(nets.step + 1, num_epochs):
-        tr_loss = train_epoch(model, train, optimizer, scaler)
+        tr_loss = train_epoch(model, train, optimizer)
         val_loss = eval_epoch(model, val)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,

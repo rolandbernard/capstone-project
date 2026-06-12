@@ -359,6 +359,18 @@ class CmuPanopticDataset:
             for cap in caps:
                 cap.release()
 
+    def cleanup_yolo_dataset(self, path: str):
+        """
+        Remove from the dataset all samples that have undesirable characteristics.
+        """
+        for file in os.listdir(path):
+            if file.endswith(".json"):
+                with open(f"{path}/{file}") as f:
+                    ann = json.load(f)
+                if any(any(not (-640 < c[0] < 1280 and -480 < c[1] < 960) for c in b["kpts"]) for b in ann):
+                    os.remove(f"{path}/{file}")
+                    os.remove(f"{path}/{file[:-5]}.jpg")
+
     def extract_yolo_dataset(self, path: str = "./data/yolo"):
         """
         Extract from the dataset a set of images and annotations that can be used
@@ -372,6 +384,8 @@ class CmuPanopticDataset:
                     self.extract_scene_yolo_dataset(scene, f"{path}/val")
                 else:
                     self.extract_scene_yolo_dataset(scene, f"{path}/train")
+        self.cleanup_yolo_dataset(f"{path}/train")
+        self.cleanup_yolo_dataset(f"{path}/val")
 
     def extract_scene_kalman_dataset(self, scene: str, path: str, ith: int = 25):
         scene_path = f"{self.path}/{scene}"

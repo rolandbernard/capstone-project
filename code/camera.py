@@ -109,7 +109,7 @@ class Camera:
             self.intrinsic[:, 2] - torch.tensor([x, y, 0], dtype=torch.float),
         ], dim=1)
 
-    def project_pinhole(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
+    def project_pinhole(self, points: torch.Tensor, eps=1e-5) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane.
         This computes normalized camera coordinates and does not take into acount
