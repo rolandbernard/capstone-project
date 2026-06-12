@@ -43,6 +43,31 @@ class PoseDetector:
         self.var_inv = var_inv
         self.num_keypoint = 17
 
+    def detect_base(self, images: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Basic version of the detection loop that expects the images to be already
+        batched in the expected format.
+        """
+        pred, _ = self.model(images)
+        results = []
+        for img_res in pred:
+            valid = img_res[(img_res[:, 4] > self.threshold) &
+                            ((img_res[:, 8::3] > self.kpt_threshold).sum() >= self.min_keypoint)]
+            valid_points = valid[:, 6:].view(-1, self.num_keypoint, 3)
+            # Compute variance based on bounding box size and kpt visibility.
+            bb_size = torch.linalg.vector_norm(
+                valid[:, 2:4] - valid[:, 0:2], dim=1, keepdim=True)
+            vis = torch.clamp(
+                (valid_points[:, :, 2] - self.kpt_threshold) / (1.0 - self.kpt_threshold), min=0)
+            var = self.var_min + bb_size * bb_size * \
+                (self.var_vis / (vis + self.var_vis / self.var_inv))
+            results.append((
+                valid_points[:, :, 0:2].reshape(-1, self.num_keypoint*2),
+                torch.kron(torch.diag_embed(var),
+                           torch.eye(2, device=var.device))
+            ))
+        return results
+
     def detect_simple(self, images: torch.Tensor | list[torch.Tensor]) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """
         Run the detection algorithm and return discovered keypoints. We expect
@@ -57,25 +82,7 @@ class PoseDetector:
                 images = images.permute(0, 3, 1, 2)
             if images.dtype == torch.uint8:
                 images = images.to(torch.float32) / 255.0
-            pred, _ = self.model(images)
-            results = []
-            for img_res in pred:
-                valid = img_res[(img_res[:, 4] > self.threshold) &
-                                ((img_res[:, 8::3] > self.kpt_threshold).sum() >= self.min_keypoint)]
-                valid_points = valid[:, 6:].view(-1, self.num_keypoint, 3)
-                # Compute variance based on bounding box size and kpt visibility.
-                bb_size = torch.linalg.vector_norm(
-                    valid[:, 2:4] - valid[:, 0:2], dim=1, keepdim=True)
-                vis = torch.clamp(
-                    (valid_points[:, :, 2] - self.kpt_threshold) / (1.0 - self.kpt_threshold), min=0)
-                var = self.var_min + bb_size * bb_size * \
-                    (self.var_vis / (vis + self.var_vis / self.var_inv))
-                results.append((
-                    valid_points[:, :, 0:2].reshape(-1, self.num_keypoint*2),
-                    torch.kron(torch.diag_embed(var),
-                               torch.eye(2, device=var.device))
-                ))
-            return results
+            return self.detect_base(images)
 
     def detect(self, cams: list[Camera], images: torch.Tensor | list[torch.Tensor]) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """
@@ -94,6 +101,48 @@ class PoseDetector:
         """
         self.model = self.model.to(*args, **kargs)
         return self
+
+
+class CustomPoseDetector(PoseDetector):
+    """
+    This is an wrapper class around the YOLO model with the custom keypoint
+    prediction head. This extends `PoseDetector` even though it does not share
+    nearly any of its functionality.
+    """
+
+    def __init__(self, model: CustomHeadedYolo, threshold: float = 0.5, compile: bool = True):
+        model.eval()
+        if compile:
+            model.compile()
+        self.model = model
+        self.threshold = threshold
+        self.num_keypoint = 17
+
+    def detect_base(self, images: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Run the detection algorithm and return discovered keypoints.
+        """
+        pred = self.model(images)
+        valid_mask = pred["one2one"]["scores"] > self.threshold
+        results = []
+        for b in range(images.shape[0]):
+            valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
+            kpts = pred["kpts_extra"][b, :, valid_idx] \
+                .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
+            mu = kpts[..., :2]
+            a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
+            # Compute variance based on cholesky factors.
+            cov = torch.stack([
+                torch.stack([a*a, a*c], dim=-1),
+                torch.stack([a*c, c*c + b*b], dim=-1)
+            ], dim=-2)
+            # Diagonalize the covariances assuming independence.
+            cov = torch.diag_embed(cov.permute(0, 2, 3, 1), dim1=1, dim2=3)
+            results.append((
+                mu.reshape(-1, self.num_keypoint*2),
+                cov.reshape(-1, self.num_keypoint*2, self.num_keypoint*2)
+            ))
+        return results
 
 
 class CustomPose(Pose26):
@@ -141,14 +190,12 @@ class CustomHeadedYolo(nn.Module):
 
     def __init__(self, original_model: str | PoseModel = "yolo26n-pose", path: str = "./nets"):
         super().__init__()
+        # Acquire the base model.
         if isinstance(original_model, str):
             original_model = YOLO(
                 f"{path}/{original_model}.pt").model  # type: ignore
         self.base_net: PoseModel = original_model  # type: ignore
-        c4, nk = 85, 17*5
-        self.extra_head = nn.ModuleList(nn.Sequential(
-            Conv(c4, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, nk, 1)
-        ) for _ in range(3))
+        # Replace the final layer of the model.
         old_head = self.base_net.model[-1]
         old_state_dict = old_head.state_dict()
         new_head = CustomPose()
@@ -157,6 +204,17 @@ class CustomHeadedYolo(nn.Module):
         new_head.stride = old_head.stride
         new_head.load_state_dict(old_state_dict, strict=False)
         self.base_net.model[-1] = new_head
+        # Freeze the base model.
+        self.base_net.eval()
+        for param in self.base_net.parameters():
+            param.requires_grad = False
+        # Create the extra head.
+        c4, nk = 85, 17*5
+        self.extra_head = nn.ModuleList(nn.Sequential(
+            Conv(c4, c4*3//2, 3),
+            Conv(c4*3//2, c4*3//2, 3),
+            nn.Conv2d(c4*3//2, nk, 1)
+        ) for _ in range(3))
 
     @property
     def device(self):
@@ -170,6 +228,11 @@ class CustomHeadedYolo(nn.Module):
     def strides(self):
         return self.base_net.model[-1].strides
 
+    def train(self, train=True):
+        super().train(train)
+        self.base_net.eval()
+        return self
+
     def extra_parameters(self):
         """
         Get the extra parameters that have been added by the custom head. During
@@ -178,9 +241,10 @@ class CustomHeadedYolo(nn.Module):
         return self.extra_head.parameters()
 
     def forward(self, x):
-        self.base_net.eval()
         bs = x.shape[0]
-        _, pred = self.base_net(x)
+        with torch.no_grad():
+            assert not self.base_net.training
+            _, pred = self.base_net(x)
         extra = torch.cat([
             self.extra_head[i](features).view(bs, 17*5, -1)
             for i, features in enumerate(pred["one2one"]["kpts_features"])
@@ -326,22 +390,6 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
         print("max epoch reached")
 
 
-def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, compile=True):
-    """
-    Initialize or load the net storage from the specified directories. This
-    function will take the necessary parameters from the supplied configuration.
-    """
-    for param in model.base_net.parameters():
-        param.requires_grad = False
-    for param in model.extra_parameters():
-        param.requires_grad = True
-    optimizer = optim.AdamW(model.extra_parameters(),
-                            lr=1e-3, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6)
-    return NetStorage(nets_dir, stat_dir, model, optimizer, scheduler, compile)
-
-
 def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, testing=False, callback=None):
     """
     Perform a multiple training epochs. This will initialize the net storage in
@@ -350,7 +398,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration. The test and train split are generated.
     """
     util.set_seed(42)
-    nets = net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE))
+    nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE))
     full_train = dataset.YoloDataset(
         f"{os.path.dirname(__file__)}/data/yolo/train")
     if testing:
