@@ -367,7 +367,7 @@ class CmuPanopticDataset:
             if file.endswith(".json"):
                 with open(f"{path}/{file}") as f:
                     ann = json.load(f)
-                if any(any(not (-640 < c[0] < 1280 and -480 < c[1] < 960) for c in b["kpts"]) for b in ann):
+                if any(any(not (-640 < c[0] < 1280 and -480 < c[1] < 960 and 0.0 <= c[2] <= 1.0) for c in b["kpts"]) for b in ann):
                     os.remove(f"{path}/{file}")
                     os.remove(f"{path}/{file[:-5]}.jpg")
 

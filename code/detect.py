@@ -250,7 +250,7 @@ class CustomHeadedYolo(nn.Module):
         return pred
 
 
-def compute_nll(pred: torch.Tensor, gt: torch.Tensor, eps=1e-5) -> torch.Tensor:
+def compute_nll(pred: torch.Tensor, gt: torch.Tensor, w_mse, eps=1e-5) -> torch.Tensor:
     """
     Computes the weighted negative log likelihood loss for 2D Gaussian in the
     predictions against the ground truth.
@@ -266,11 +266,11 @@ def compute_nll(pred: torch.Tensor, gt: torch.Tensor, eps=1e-5) -> torch.Tensor:
     v = torch.linalg.solve_triangular(L, diff, upper=False)
     mahalanobis = v.mT @ v
     nll = logdet + mahalanobis
-    weighted_nll = nll * w
-    return torch.mean(weighted_nll) + 0.1 * torch.mean(diff*diff)
+    return torch.mean(nll * w) \
+        + w_mse * torch.mean(torch.sum(diff*diff, dim=(-1, -2)) * w)
 
 
-def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0, eps=1e-5):
+def compute_loss(pred, gt: torch.Tensor, model, w_mse, threshold: float = 0.0, eps=1e-5):
     """
     Compute the loss between the predictions and the ground truth. First, match
     the detections against the known ground truth and then compute the negative
@@ -306,10 +306,10 @@ def compute_loss(pred, gt: torch.Tensor, model, threshold: float = 0.0, eps=1e-5
         gts.append(b_gt[col_idx])
     if len(preds) == 0:
         return torch.tensor(0.0, device=gt.device, requires_grad=True)
-    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), eps)
+    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse, eps)
 
 
-def train_epoch(model, loader, optimizer):
+def train_epoch(model, loader, optimizer, w_mse):
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -323,7 +323,7 @@ def train_epoch(model, loader, optimizer):
         gts = gts.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         pred = model(img)
-        loss = compute_loss(pred, gts, model)
+        loss = compute_loss(pred, gts, model, w_mse)
         loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
         optimizer.step()
@@ -332,7 +332,7 @@ def train_epoch(model, loader, optimizer):
     return total_loss / count
 
 
-def eval_epoch(model, loader):
+def eval_epoch(model, loader, w_mse):
     """
     Run a single evaluation round over the given loader. This is intended to be
     used after each epoch to evaluate the performance on the validation set.
@@ -346,13 +346,13 @@ def eval_epoch(model, loader):
             img = img.to(model.device, non_blocking=True)
             gts = gts.to(model.device, non_blocking=True)
             pred = model(img)
-            loss = compute_loss(pred, gts, model)
+            loss = compute_loss(pred, gts, model, w_mse)
             total_loss += loss.item()
             count += 1
     return total_loss / count
 
 
-def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
+def train_epochs(nets: NetStorage, train, val, num_epochs: int, w_mse: float, callback=None):
     """
     Perform a multiple training epochs, recoding the history of both training
     and validation loss in the given log directory. This will train using the
@@ -365,8 +365,8 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
     optimizer = nets.optimizer
     scheduler = nets.scheduler
     for epoch in range(nets.step + 1, num_epochs):
-        tr_loss = train_epoch(model, train, optimizer)
-        val_loss = eval_epoch(model, val)
+        tr_loss = train_epoch(model, train, optimizer, w_mse)
+        val_loss = eval_epoch(model, val, w_mse)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,
         }, model, optimizer, scheduler)
@@ -379,7 +379,7 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
         print("max epoch reached")
 
 
-def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, testing=False, callback=None):
+def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=0.05, testing=False, callback=None):
     """
     Perform a multiple training epochs. This will initialize the net storage in
     case we are starting a fresh run, and resume the existing run otherwise. The
@@ -404,4 +404,4 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     val_loader = DataLoader(
         val, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
-    train_epochs(nets, train_loader, val_loader, num_epochs, callback)
+    train_epochs(nets, train_loader, val_loader, num_epochs, w_mse, callback)
