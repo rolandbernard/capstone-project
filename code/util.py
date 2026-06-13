@@ -112,6 +112,7 @@ class NetStorage:
                         state[k] = v.to(self.net.device)
             sched = torch.load(f"{self.nets_dir}/{step}.sched")
             self.scheduler.load_state_dict(sched)
+            print(f"Loaded checkpoint for step {step}.")
 
 
 def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, compile=True):
