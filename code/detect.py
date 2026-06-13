@@ -3,7 +3,6 @@ import os
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
 from ultralytics import YOLO
 from ultralytics.nn.tasks import PoseModel
@@ -123,7 +122,7 @@ class CustomPoseDetector(PoseDetector):
         Run the detection algorithm and return discovered keypoints.
         """
         pred = self.model(images)
-        valid_mask = pred["one2one"]["scores"] > self.threshold
+        valid_mask = torch.sigmoid(pred["one2one"]["scores"]) > self.threshold
         results = []
         for b in range(images.shape[0]):
             valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
@@ -143,43 +142,6 @@ class CustomPoseDetector(PoseDetector):
                 cov.reshape(-1, self.num_keypoint*2, self.num_keypoint*2)
             ))
         return results
-
-
-class CustomPose(Pose26):
-    """
-    A custom head for the YOLO26 model that saves also the features of the pose
-    head so they can be reused later to train to natively output mean and covariance
-    for each keypoint position instead of visibility value. The original head is kept.
-    """
-
-    def __init__(self, nc: int = 1, kpt_shape: tuple = (17, 3), reg_max=1, end2end=True, ch: tuple = (64, 128, 256)):
-        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
-
-    def forward_head(
-        self,
-        x: list[torch.Tensor],
-        box_head: nn.Module,
-        cls_head: nn.Module,
-        pose_head: nn.ModuleList,
-        kpts_head: nn.ModuleList,
-        kpts_sigma_head: nn.ModuleList,
-    ) -> dict[str, torch.Tensor]:
-        """Concatenates and returns predicted bounding boxes, class probabilities, and keypoints."""
-        preds = Detect.forward_head(self, x, box_head, cls_head)
-        if pose_head is not None:
-            bs = x[0].shape[0]
-            features = [pose_head[i](x[i]) for i in range(self.nl)]
-            preds["kpts_features"] = features  # type: ignore
-            preds["kpts"] = torch.cat([
-                kpts_head[i](features[i]).view(bs, self.nk, -1)
-                for i in range(self.nl)
-            ], dim=2)
-            if self.training:
-                preds["kpts_sigma"] = torch.cat([
-                    kpts_sigma_head[i](features[i]).view(bs, self.nk_sigma, -1)
-                    for i in range(self.nl)
-                ], dim=2)
-        return preds
 
 
 class CustomHeadedYolo(nn.Module):
@@ -202,6 +164,7 @@ class CustomHeadedYolo(nn.Module):
         # Create the extra head.
         self.extra_head = nn.ModuleList(nn.Sequential(
             Conv(ch, 100, 3),
+            Conv(100, 100, 3),
             Conv(100, 100, 3),
             Conv(100, 100, 3),
             nn.Conv2d(100, 17*5, 1)
@@ -242,26 +205,25 @@ class CustomHeadedYolo(nn.Module):
         ], dim=2).view(bs, 17, 5, -1)
         pred["kpts_extra"] = torch.concat([
             (extra[:, :, 0:2] + self.anchors) * self.strides,
-            torch.exp(
-                torch.clamp(extra[:, :, 2:4], min=-4, max=6)
-            ) * self.strides,
+            torch.exp(extra[:, :, 2:4]) * self.strides,
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
 
 
-def compute_nll(pred: torch.Tensor, gt: torch.Tensor, w_mse, eps=1e-5) -> torch.Tensor:
+def compute_nll(pred: torch.Tensor, gt: torch.Tensor, w_mse, w_thres=0.05) -> torch.Tensor:
     """
     Computes the weighted negative log likelihood loss for 2D Gaussian in the
     predictions against the ground truth.
     """
     mu, a, b, c = pred[..., :2], pred[..., 2], pred[..., 3], pred[..., 4]
     gt_xy, w = gt[..., :2], gt[..., 2]
+    w = w > w_thres
     L = torch.stack([
         torch.stack([a, torch.zeros_like(a)], dim=-1),
         torch.stack([c, b], dim=-1)
     ], dim=-2)
-    logdet = 2.0 * (torch.log(a + eps) + torch.log(b + eps))
+    logdet = 2.0 * (torch.log(a) + torch.log(b))
     diff = (gt_xy - mu).unsqueeze(-1)
     v = torch.linalg.solve_triangular(L, diff, upper=False)
     mahalanobis = v.mT @ v
@@ -306,7 +268,7 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse, threshold: float = 0.0, e
         gts.append(b_gt[col_idx])
     if len(preds) == 0:
         return torch.tensor(0.0, device=gt.device, requires_grad=True)
-    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse, eps)
+    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse)
 
 
 def train_epoch(model, loader, optimizer, w_mse):
@@ -379,7 +341,7 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, w_mse: float, ca
         print("max epoch reached")
 
 
-def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=0.05, testing=False, callback=None):
+def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=0.0, testing=False, callback=None):
     """
     Perform a multiple training epochs. This will initialize the net storage in
     case we are starting a fresh run, and resume the existing run otherwise. The

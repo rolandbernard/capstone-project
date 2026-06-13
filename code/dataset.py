@@ -387,16 +387,13 @@ class CmuPanopticDataset:
         self.cleanup_yolo_dataset(f"{path}/train")
         self.cleanup_yolo_dataset(f"{path}/val")
 
-    def extract_scene_kalman_dataset(self, scene: str, path: str, ith: int = 25):
+    def extract_scene_kalman_dataset(self, scene: str, path: str, use_hd: bool):
         scene_path = f"{self.path}/{scene}"
-        vga_ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
-        if os.path.exists(vga_ann_path):
-            raise NotImplementedError
-        hd_ann_path = f"{scene_path}/hdPose3d_stage1_coco19"
-        if os.path.exists(hd_ann_path):
+        ann_path = f"{scene_path}/{"hd" if use_hd else "vga"}Pose3d_stage1_coco19"
+        if os.path.exists(ann_path):
             raise NotImplementedError
 
-    def extract_kalman_dataset(self, path: str = "./data/kalman"):
+    def extract_kalman_dataset(self, path: str = "./data/kalman", use_hd=False):
         """
         Extract from the dataset a set of single person tracks that can be used
         for learning the Kalman filter parameters from real data.
@@ -406,9 +403,11 @@ class CmuPanopticDataset:
         for scene in self.scenes:
             if scene not in self.test_scenes:
                 if scene in self.val_scenes:
-                    self.extract_scene_kalman_dataset(scene, f"{path}/val")
+                    self.extract_scene_kalman_dataset(
+                        scene, f"{path}/val", use_hd)
                 else:
-                    self.extract_scene_kalman_dataset(scene, f"{path}/train")
+                    self.extract_scene_kalman_dataset(
+                        scene, f"{path}/train", use_hd)
 
 
 class YoloDataset(Dataset):

@@ -119,8 +119,7 @@ def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, compile=Tr
     Initialize or load the net storage from the specified directories. This
     function will take the necessary parameters from the supplied configuration.
     """
-    optimizer = optim.AdamW(model.extra_parameters(),
-                            lr=1e-3, weight_decay=1e-4)
+    optimizer = optim.Adam(model.extra_parameters(), lr=3e-3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6)
     return NetStorage(nets_dir, stat_dir, model, optimizer, scheduler, compile)
