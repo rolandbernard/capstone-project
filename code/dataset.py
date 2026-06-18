@@ -2,25 +2,19 @@
 import os
 import io
 import json
-import random
 import zipfile
 import tarfile
 import urllib.request
-from itertools import count
 
-import cv2
 import gdown
 import torch
-from torch.utils.data import Dataset
 
 import source
 from camera import Camera
 
 
 def download_file(filename: str, data_url: str):
-    """
-    Download a file from the given url and put it into the given filename.
-    """
+    """ Download a file from the given url and put it into the given filename. """
     try:
         with urllib.request.urlopen(data_url) as req_stream:
             data = req_stream.read()
@@ -31,9 +25,7 @@ def download_file(filename: str, data_url: str):
 
 
 def download_zip(folder: str, data_url: str):
-    """
-    Download a zip archive from the given url and extract it into the given folder.
-    """
+    """ Download a zip archive from the given url and extract it into the given folder. """
     try:
         with urllib.request.urlopen(data_url) as req_stream:
             with zipfile.ZipFile(io.BytesIO(req_stream.read())) as zip_file:
@@ -43,9 +35,7 @@ def download_zip(folder: str, data_url: str):
 
 
 def download_tar(folder: str, data_url: str):
-    """
-    Download a tar archive from the given url and extract it into the given folder.
-    """
+    """ Download a tar archive from the given url and extract it into the given folder. """
     try:
         with urllib.request.urlopen(data_url) as req_stream:
             with tarfile.open(fileobj=io.BytesIO(req_stream.read()), mode="r:*") as zip_file:
@@ -55,17 +45,13 @@ def download_tar(folder: str, data_url: str):
 
 
 class SalsaDataset:
-    """
-    Class for handling the Salsa dataset (https://tev.fbk.eu/resources/salsa).
-    """
+    """ Class for handling the Salsa dataset (https://tev.fbk.eu/resources/salsa). """
 
     fps = 15
     scenes: list[str] = ["PosterSession", "CocktailParty"]
 
     def __init__(self, path: str = "./data/salsa"):
-        """
-        Create an instance of the class with the data stored in the given directory.
-        """
+        """ Create an instance of the class with the data stored in the given directory. """
         self.path = path
 
     def download(self):
@@ -92,32 +78,27 @@ class SalsaDataset:
             gdown.cached_download(  # type: ignore
                 id=id, path=f"{self.path}/CocktailParty/cam{i}.avi")
 
-    def get_source(self, name: str = "PosterSession") -> source.VideoSource:
+    def get_source(self, name: str = "PosterSession", cams: int | list[int] = 4) -> source.OfflineVideoSource:
         """
         Load one of the two video sequences from the dataset into a video source
         for further processing. The name can be wither "PosterSession" (default)
         or "CocktailParty".
         """
-        streams = [f"{self.path}/{name}/cam{i}.avi" for i in range(4)]
+        streams = [f"{self.path}/{name}/cam{i}.avi"
+                   for i in (cams if isinstance(cams, list) else range(cams))]
         cameras = []
-        for i in range(4):
-            camera = Camera()
-            camera.load_ini(f"{self.path}/cam{i}.ini")
-            cameras.append(camera)
+        for i in cams if isinstance(cams, list) else range(cams):
+            cameras.append(Camera.from_file(f"{self.path}/cam{i}.ini"))
         return source.OfflineVideoSource(streams, cameras)
 
 
 class H3wbDataset:
-    """
-    Class for handling the H3WB dataset (https://github.com/wholebody3d/wholebody3d).
-    """
+    """ Class for handling the H3WB dataset (https://github.com/wholebody3d/wholebody3d). """
 
     fps = 10
 
     def __init__(self, path: str = "./data/h3wb"):
-        """
-        Create an instance of the class with the data stored in the given directory.
-        """
+        """ Create an instance of the class with the data stored in the given directory. """
         self.path = path
 
     def download(self):
@@ -133,17 +114,13 @@ class H3wbDataset:
 
 
 class D3pwDataset:
-    """
-    Class for handling the 3DPW dataset (https://virtualhumans.mpi-inf.mpg.de/3DPW/).
-    """
+    """ Class for handling the 3DPW dataset (https://virtualhumans.mpi-inf.mpg.de/3DPW/). """
 
     endpoint: str = "https://virtualhumans.mpi-inf.mpg.de/3DPW"
     fps = 30
 
     def __init__(self, path: str = "./data/3dpw"):
-        """
-        Create an instance of the class with the data stored in the given directory.
-        """
+        """ Create an instance of the class with the data stored in the given directory. """
         self.path = path
 
     @property
@@ -151,9 +128,7 @@ class D3pwDataset:
         return os.listdir(f"{self.path}/imageFiles")
 
     def download(self):
-        """
-        Download the dataset from official source. Download is skipped if already present.
-        """
+        """ Download the dataset from official source. Download is skipped if already present. """
         os.makedirs(self.path, exist_ok=True)
         if not os.path.exists(f"{self.path}/imageFiles"):
             download_zip(self.path, f"{self.endpoint}/imageFiles.zip")
@@ -162,9 +137,7 @@ class D3pwDataset:
 
 
 class CmuPanopticDataset:
-    """
-    Class for handling the CMU Panoptic dataset (http://domedb.perception.cs.cmu.edu/index.html).
-    """
+    """ Class for handling the CMU Panoptic dataset (http://domedb.perception.cs.cmu.edu/index.html). """
 
     endpoint: str = "http://domedb.perception.cs.cmu.edu/webdata/dataset"
     hd_fps = 29.97
@@ -200,9 +173,7 @@ class CmuPanopticDataset:
         '170228_haggling_b2', '170404_haggling_b2', '161029_piano3',
     ]
     test_scenes: list[str] = [
-        "171204_pose6", "171026_pose3", "170221_haggling_m3", "170224_haggling_b3",
-        "170228_haggling_b3", "170404_haggling_b3", "170407_haggling_b3", "161029_piano4",
-        "161202_haggling1", "170915_office1", "161029_build1"
+        "171204_pose6", "161029_piano4", "170915_office1", "161029_build1", "160224_haggling1",
     ]
     vga_panels = [
         1, 19, 14, 6, 16, 9, 5, 10, 18, 15, 3, 8, 4, 20, 11, 13, 7, 2, 17, 12, 9, 5, 6, 3, 15, 2, 12, 14, 16, 10, 4, 13, 20, 8, 17, 19,
@@ -238,9 +209,7 @@ class CmuPanopticDataset:
     ]
 
     def __init__(self, path: str = "./data/panoptic"):
-        """
-        Create an instance of the class with the data stored in the given directory.
-        """
+        """ Create an instance of the class with the data stored in the given directory. """
         self.path = path
 
     def download_scene(self, name: str, num_hd_cams: int = 0, num_vga_cams: int = 0):
@@ -283,156 +252,65 @@ class CmuPanopticDataset:
         return True
 
     def download(self, num_hd_cams: int = 0, num_vga_cams: int = 4, scenes: None | list[str] = None):
-        """
-        Download the dataset from official source. Download is skipped if already present.
-        """
+        """ Download the dataset from official source. Download is skipped if already present. """
         os.makedirs(self.path, exist_ok=True)
         for scene in scenes or self.scenes:
             self.download_scene(scene, num_hd_cams, num_vga_cams)
 
     def load_cam(self, calib, name: str) -> Camera:
         cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
-        return Camera(
-            rotation=torch.tensor(cam_calib["R"]),
-            translation=torch.tensor(cam_calib["t"]).squeeze(-1),
-            intrinsic=torch.tensor(cam_calib["K"]),
-            distortion=torch.tensor(cam_calib["distCoef"]),
-        )
+        return Camera.from_dict(cam_calib)
 
-    def get_source(self, name: str, num_hd_cams: int = 0, num_vga_cams: int = 4) -> source.VideoSource:
+    def get_source(self, scene: str, num_hd_cams: int = 0, num_vga_cams: int = 4) -> source.OfflineVideoSource:
         """
         Load one of the scenes from the dataset into a video source for further
         processing. The name should be one of the ones in `CmuPanopticDataset.scenes`.
         """
-        with open(f"{self.path}/{name}/calibration.json") as f:
+        with open(f"{self.path}/{scene}/calibration.json") as f:
             calib = json.load(f)
         streams = []
         cameras = []
         for i in range(num_hd_cams):
             name = f"00_{i:02d}"
-            streams.append(f"{self.path}/{name}/hd_{name}.mp4")
+            streams.append(f"{self.path}/{scene}/hd_{name}.mp4")
             cameras.append(self.load_cam(calib, name))
         for i in range(num_vga_cams):
             name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
-            streams.append(f"{self.path}/{name}/vga_{name}.mp4")
+            streams.append(f"{self.path}/{scene}/vga_{name}.mp4")
             cameras.append(self.load_cam(calib, name))
         return source.OfflineVideoSource(streams, cameras)
 
-    def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 25):
-        scene_path = f"{self.path}/{scene}"
-        ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
-        videos = [f for f in os.listdir(scene_path)
-                  if f.startswith("vga_") and f.endswith(".mp4")]
-        with open(f"{scene_path}/calibration.json") as f:
+    def load_ground_truth_vga(self, scene: str, num_vga_cams: int = 4) -> tuple[list[Camera], list[list], float]:
+        """
+        Load the ground truth data in the same format as produced in the evaluation
+        application of the tracking system. This can be used to perform evaluation.
+        For visualization purposes it also generates the first few camera positions.
+        """
+        with open(f"{self.path}/{scene}/calibration.json") as f:
             calib = json.load(f)
-        cams = [self.load_cam(calib, v[4:-4]) for v in videos]
-        caps = [cv2.VideoCapture(f"{scene_path}/{v}") for v in videos]
-        try:
-            for i in count():
-                frames = []
-                for cap in caps:
-                    ret, frame = cap.read()
-                    if not ret:
-                        return
-                    frames.append(frame)
-                if i % ith == 0 and os.path.exists(f"{ann_path}/body3DScene_{i:08d}.json"):
-                    with open(f"{ann_path}/body3DScene_{i:08d}.json") as f:
-                        ann = json.load(f)
-                    if len(ann["bodies"]) > 0:
-                        idx = random.randint(0, len(frames) - 1)
-                        cv2.imwrite(f"{path}/{scene}_{i}.jpg", frames[idx])
-                        with open(f"{path}/{scene}_{i}.json", "w") as f:
-                            json.dump([
-                                {
-                                    "id": b["id"],
-                                    "kpts": torch.concat([
-                                        cams[idx].project(
-                                            torch.tensor(b["joints19"])
-                                            .view(19, 4)[self.coco17_indices, :3]
-                                        ),
-                                        torch.tensor(b["joints19"])
-                                        .view(19, 4)[self.coco17_indices, 3:4]
-                                    ], dim=1).tolist(),
-                                } for b in ann["bodies"]
-                            ], f)
-        finally:
-            for cap in caps:
-                cap.release()
-
-    def cleanup_yolo_dataset(self, path: str):
-        """
-        Remove from the dataset all samples that have undesirable characteristics.
-        """
-        for file in os.listdir(path):
-            if file.endswith(".json"):
-                with open(f"{path}/{file}") as f:
-                    ann = json.load(f)
-                if any(any(not (-640 < c[0] < 1280 and -480 < c[1] < 960 and 0.0 <= c[2] <= 1.0) for c in b["kpts"]) for b in ann):
-                    os.remove(f"{path}/{file}")
-                    os.remove(f"{path}/{file[:-5]}.jpg")
-
-    def extract_yolo_dataset(self, path: str = "./data/yolo"):
-        """
-        Extract from the dataset a set of images and annotations that can be used
-        to train the custom YOLO26 based pose estimation model.
-        """
-        os.makedirs(f"{path}/train", exist_ok=True)
-        os.makedirs(f"{path}/val", exist_ok=True)
-        for scene in self.scenes:
-            if scene not in self.test_scenes and self.is_valid_scene(scene):
-                if scene in self.val_scenes:
-                    self.extract_scene_yolo_dataset(scene, f"{path}/val")
-                else:
-                    self.extract_scene_yolo_dataset(scene, f"{path}/train")
-        self.cleanup_yolo_dataset(f"{path}/train")
-        self.cleanup_yolo_dataset(f"{path}/val")
-
-    def extract_scene_kalman_dataset(self, scene: str, path: str, use_hd: bool):
-        scene_path = f"{self.path}/{scene}"
-        ann_path = f"{scene_path}/{"hd" if use_hd else "vga"}Pose3d_stage1_coco19"
-        if os.path.exists(ann_path):
-            raise NotImplementedError
-
-    def extract_kalman_dataset(self, path: str = "./data/kalman", use_hd=False):
-        """
-        Extract from the dataset a set of single person tracks that can be used
-        for learning the Kalman filter parameters from real data.
-        """
-        os.makedirs(f"{path}/train", exist_ok=True)
-        os.makedirs(f"{path}/val", exist_ok=True)
-        for scene in self.scenes:
-            if scene not in self.test_scenes:
-                if scene in self.val_scenes:
-                    self.extract_scene_kalman_dataset(
-                        scene, f"{path}/val", use_hd)
-                else:
-                    self.extract_scene_kalman_dataset(
-                        scene, f"{path}/train", use_hd)
-
-
-class YoloDataset(Dataset):
-    """
-    Dataset yielding the individual frames from the yolo dataset extracted from
-    the CMU Panoptic sequences. It loads both the image and 
-    """
-
-    def __init__(self, root_dir: str = "./data/yolo/train"):
-        self.root_dir = root_dir
-        self.files = sorted(
-            (f for f in os.listdir(root_dir) if f.endswith(".jpg")))
-
-    def __len__(self):
-        return len(self.files)
-
-    def __getitem__(self, idx):
-        img_file = self.files[idx]
-        img = cv2.imread(f"{self.root_dir}/{img_file}")
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # type: ignore
-        img = torch.from_numpy(img)
-        img = img.permute(2, 0, 1)
-        img = img.to(torch.float32) / 255.0
-        with open(f"{self.root_dir}/{img_file[:-4]}.json") as f:
-            an = json.load(f)[:10]
-        ann = torch.zeros(10, 17, 3)
-        ann[:len(an)] = torch.tensor([b["kpts"] for b in an])  # type: ignore
-        return img, ann
+        cameras = []
+        for i in range(num_vga_cams):
+            name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
+            cameras.append(self.load_cam(calib, name))
+        ann_path = f"{self.path}/{scene}/vgaPose3d_stage1_coco19"
+        files = sorted(f for f in os.listdir(ann_path))
+        last_idx = -1
+        frames = []
+        for file in files:
+            idx = int(files[0][12:-5])
+            frames.extend([[]] * (idx - last_idx - 1))
+            with open(f"{ann_path}/{file}") as f:
+                ann = json.load(f)
+                frames.append([
+                    {
+                        "id": b["id"],
+                        "kpts": torch.tensor(b["joints19"])
+                        .view(19, 4)[self.coco17_indices, :3]
+                        .tolist(),
+                        "conf": torch.tensor(b["joints19"])
+                        .view(19, 4)[self.coco17_indices, 3]
+                        .tolist(),
+                    } for b in ann["bodies"]
+                ])
+            last_idx = idx
+        return cameras, frames, self.vga_fps

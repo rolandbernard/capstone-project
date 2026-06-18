@@ -22,9 +22,7 @@ class LinearPhysics:
         self.get_dyn = lru_cache()(self._get_dyn)
 
     def _get_dyn(self, dt: float) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Create a new dynamics and covariance matrix for the given timestamp.
-        """
+        """ Create a new dynamics and covariance matrix for the given timestamp. """
         return discretize(dt, self.dyn_mat, self.dyn_cov)
 
     def predict(self, dt: float, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -37,9 +35,7 @@ class LinearPhysics:
         return predict(mean, cov, dyn_mat, dyn_cov)
 
     def to(self, *args, **kargs):
-        """
-        Apply the PyTorch `.to` method to the contained model.
-        """
+        """ Apply the PyTorch `.to` method to the contained model. """
         self.dyn_mat = self.dyn_mat.to(*args, **kargs)
         self.dyn_cov = self.dyn_cov.to(*args, **kargs)
         self.init_mean = self.init_mean.to(*args, **kargs)
@@ -48,10 +44,103 @@ class LinearPhysics:
         return self
 
 
+class ConstrainedPhysics(LinearPhysics):
+    """
+    A physics model that incorporates rigid body constraints between keypoints.
+    The state is assumed to contain positions, velocities, and limb lengths.
+    """
+
+    def __init__(
+        self, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor, init_mean: torch.Tensor,
+        init_cov: torch.Tensor, constraints: torch.Tensor, point_mix: torch.Tensor,
+        constr_cov: torch.Tensor, num_keypoint: int = 17
+    ):
+        super().__init__(dyn_mat, dyn_cov, init_mean, init_cov)
+        self.constraints = constraints
+        self.point_mix = point_mix
+        self.num_keypoint = num_keypoint
+        self.constr_cov = constr_cov
+        self.num_constr = constraints.shape[1]
+
+    def compute_keypoints(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the augmented points on which constraints are defined. """
+        *Bs, _ = x.shape
+        points = x[:self.num_keypoint*3].view(*Bs, -1, 3)
+        return torch.concat([
+            points,
+            (points[..., self.point_mix[0], :]
+             + points[..., self.point_mix[1], :]) * 0.5
+        ], dim=-2)
+
+    def basic_distances(self, points: torch.Tensor) -> torch.Tensor:
+        """ Compute the constrained distances based on augmented points. """
+        pi = points[..., self.constraints[0], :]
+        pj = points[..., self.constraints[1], :]
+        return torch.linalg.vector_norm(pi - pj, dim=-1)
+
+    def compute_distances(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constrained distances. """
+        return self.basic_distances(self.compute_keypoints(x))
+
+    def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constraint violation. """
+        return self.compute_distances(x) - x[..., self.constraints[2]]
+
+    def to(self, *args, **kargs):
+        super().to(*args, **kargs)
+        self.constraints = self.constraints.to(*args, **kargs)
+        self.point_mix = self.point_mix.to(*args, **kargs)
+        self.constr_cov = self.constr_cov.to(*args, **kargs)
+        return self
+
+
+class WalledPhysics(ConstrainedPhysics):
+    """
+    A physics model that incorporates walls and a floor. Some keypoints are given
+    a weak prior to be on the floor, and all keypoints are push out of the walls.
+    """
+
+    def __init__(
+        self, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor, init_mean: torch.Tensor,
+        init_cov: torch.Tensor, constraints: torch.Tensor, point_mix: torch.Tensor,
+        constr_cov: torch.Tensor, wall_centers: torch.Tensor, wall_norm: torch.Tensor,
+        feet_idx: torch.Tensor, feet_height: float, num_keypoint: int = 17
+    ):
+        super().__init__(
+            dyn_mat, dyn_cov, init_mean, init_cov, constraints,
+            point_mix, constr_cov, num_keypoint
+        )
+        self.wall_centers = wall_centers
+        self.wall_norm = wall_norm
+        self.feet_idx = feet_idx
+        self.feet_height = feet_height
+        self.num_constr = constraints.shape[1] \
+            + num_keypoint * wall_centers.shape[0] + feet_idx.shape[1]
+
+    def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constraint violation. """
+        *Bs, _ = x.shape
+        points = x[:self.num_keypoint*3].view(*Bs, -1, 3)
+        w_dist = ((points.view(*Bs, -1, 1, 3) - self.wall_centers.view(*Bs, 1, -1, 3))
+                  .view(*Bs, -1, 1, 1, 3) @ self.wall_norm.view(*Bs, 1, -1, 3, 1)) \
+            .squeeze(-1).squeeze(-1)
+        return torch.concat([
+            super().pseudo_obs(x),
+            torch.nn.functional.relu(-w_dist.view(*Bs, -1)),
+            w_dist[..., self.feet_idx[0], self.feet_idx[1]].view(*Bs, -1)
+            - self.feet_height,
+        ], dim=-1)
+
+    def to(self, *args, **kargs):
+        super().to(*args, **kargs)
+        self.wall_centers = self.wall_centers.to(*args, **kargs)
+        self.wall_norm = self.wall_norm.to(*args, **kargs)
+        self.feet_idx = self.feet_idx.to(*args, **kargs)
+        return self
+
+
 def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
-    """
-    Discretize the given continuous-time matrices using the given time.
-    """
+    """ Discretize the given continuous-time matrices using the given time. """
     # Use a second order approximation for now.
     N, N = dyn_mat.shape
     dyn_mat = torch.eye(N, device=dyn_mat.device) + dyn_mat * dt \
@@ -151,16 +240,14 @@ def eupdate_ex(
 
 
 def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Compute the Jacobian over arbitrarily batch dimension of the given function f.
-    """
+    """ Compute the Jacobian over arbitrarily batch dimension of the given function f. """
     def func(x):
         res = f(x)
         return res, res
     *Bs, N = x.shape
     jac, val = torch.vmap(torch.func.jacrev(func, has_aux=True))(x.view(-1, N))
     *_, M, N = jac.shape
-    return jac.reshape(*Bs, M, N), val.reshape(*Bs, M)
+    return jac.view(*Bs, M, N), val.view(*Bs, M)
 
 
 def eupdate(

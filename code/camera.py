@@ -1,4 +1,5 @@
 
+import json
 import configparser
 from dataclasses import dataclass
 
@@ -25,6 +26,18 @@ class Camera:
     intrinsic: torch.Tensor = torch.eye(3)
     distortion: torch.Tensor = torch.zeros(5)
 
+    @classmethod
+    def from_dict(cls, data):
+        cam = Camera()
+        cam.load_dict(data)
+        return cam
+
+    @classmethod
+    def from_file(cls, path: str):
+        cam = Camera()
+        cam.load_file(path)
+        return cam
+
     def load_ini(self, path: str):
         """
         Load the calibration parameters from a file in a .ini format. This will
@@ -49,7 +62,7 @@ class Camera:
         >>> cam.load_ini(temp_path)
         >>> os.remove(temp_path)
         >>> cam.translation
-        tensor([1., 2., 3.])
+        tensor([-1., -2., -3.])
         >>> cam.intrinsic[0, 2].item()
         320.0
         """
@@ -82,16 +95,50 @@ class Camera:
                 float(section["k3"]),
             ])
 
+    def load_dict(self, dict):
+        """ Load parameters from a dictionary. """
+        if "R" in dict and "t" in dict:
+            self.rotation = torch.tensor(dict["R"])
+            self.translation = torch.tensor(dict["t"]).flatten()
+        if "K" in dict:
+            self.intrinsic = torch.tensor(dict["K"])
+        if "distCoef" in dict:
+            self.distortion = torch.tensor(dict["distCoef"])
+
+    def load_json(self, path: str):
+        """ Load parameters from a JSON file. """
+        with open(path, "r") as file:
+            self.load_dict(json.load(file))
+
+    def load_file(self, path: str):
+        """ Load parameters from a file. Detect format from file extension. """
+        if path.endswith(".ini"):
+            self.load_ini(path)
+        elif path.endswith(".json"):
+            self.load_json(path)
+        else:
+            raise NotImplementedError("unable to load calibration file format")
+
+    def has_intrinsics(self) -> bool:
+        """ Check whether this has non-default intrinsic parameters. """
+        return not torch.allclose(self.intrinsic, torch.eye(3)) \
+            or not torch.allclose(self.distortion, torch.zeros(5))
+
+    def has_distortion(self) -> bool:
+        """ Check whether this has non-default distortion parameters. """
+        return not torch.allclose(self.distortion, torch.zeros(5))
+
+    def has_extrinsics(self) -> bool:
+        """ Check whether this has non-default extrinsic parameters. """
+        return not torch.allclose(self.rotation, torch.eye(3)) \
+            or not torch.allclose(self.translation, torch.zeros(3))
+
     def scale(self, scale: float):
-        """
-        Scale the camera extrinsics by the given scale.
-        """
+        """ Scale the camera extrinsics by the given scale. """
         self.translation = scale * self.translation
 
     def resize(self, old: tuple[int, int], new: tuple[int, int]):
-        """
-        Modify the camera intrinsics to accommodate a image resizing. 
-        """
+        """ Modify the camera intrinsics to accommodate a image resizing. """
         s_x, s_y = new[0] / old[0], new[1] / old[1]
         self.intrinsic = torch.stack([
             s_x * self.intrinsic[0],
@@ -109,20 +156,43 @@ class Camera:
             self.intrinsic[:, 2] - torch.tensor([x, y, 0], dtype=torch.float),
         ], dim=1)
 
+    def center(self) -> torch.Tensor:
+        """ Compute the camera center with respect to the world. """
+        return -self.rotation.mT @ self.translation
+
+    def forward(self) -> torch.Tensor:
+        """ Compute the camera forward direction with respect to the world. """
+        return self.rotation.mT @ torch.tensor([0.0, 0.0, 1.0])
+
+    def proj_matrix(self) -> torch.Tensor:
+        """ Compute the camera projection matrix. """
+        return self.intrinsic @ torch.hstack([
+            self.rotation, self.translation.unsqueeze(-1)
+        ])
+
+    def camera_to_world(self, points: torch.Tensor) -> torch.Tensor:
+        """ Convert from camera for world coordinates. """
+        return (self.rotation.mT @ (points.view(-1, 3) - self.translation)
+                .unsqueeze(-1)).view_as(points)
+
+    def world_to_camera(self, points: torch.Tensor) -> torch.Tensor:
+        """ Convert from world for camera coordinates. """
+        return ((self.rotation @ points.view(-1, 3, 1)).squeeze(-1)
+                + self.translation).view_as(points)
+
     def project_pinhole(self, points: torch.Tensor, eps=1e-5) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane.
         This computes normalized camera coordinates and does not take into acount
         camera intrinsics or distortion.
 
-        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, -1.0]))
+        >>> cam = Camera(translation=torch.tensor([0.0, 0.0, 1.0]))
         >>> pts = torch.tensor([1.0, 1.0, 1.0])
         >>> cam.project_pinhole(pts).tolist()
         [0.5, 0.5]
         """
         *Bs, M = points.shape
-        points_cam = (self.rotation @ points.view(-1, 3, 1)).squeeze(-1) \
-            + self.translation
+        points_cam = self.world_to_camera(points)
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
         z = torch.clamp(z, min=eps)
         return (xy / z).view(*Bs, M//3*2)
@@ -201,6 +271,13 @@ class Camera:
             xy_norm = (xy - xy_off) / scale
         return xy_norm.view(*Bs, M)
 
+    def undistort_points_ex(self, points: torch.Tensor, num_iters: int = 10) -> torch.Tensor:
+        """ Undistort a set of 2d points but reapply intrinsics. """
+        *Bs, M = points.shape
+        xy_norm = self.undistort_points(points, num_iters)
+        xy = self.intrinsic @ xy_norm.view(-1, 2, 1)
+        return xy.view(*Bs, M)
+
     def undistort_covars(self, covars: torch.Tensor) -> torch.Tensor:
         """
         Approximately undistort a covariance matrix. This is useful for cases
@@ -241,11 +318,20 @@ class Camera:
         self.distortion = self.distortion.to(*args, **kargs)
         return self
 
+    def __getitem__(self, key: str):
+        if key == "R":
+            return self.rotation.tolist()
+        if key == "t":
+            return self.translation.tolist()
+        if key == "K":
+            return self.intrinsic.tolist()
+        if key == "distCoef":
+            return self.distortion.tolist()
+        raise KeyError
+
 
 def inv_sqrt_sym(matrix: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """
-    Compute the inverse square-root of the given batch of matrices.
-    """
+    """ Compute the inverse square-root of the given batch of matrices. """
     diag, vecs = torch.linalg.eigh(matrix)
     inv_sqrt = 1.0 / (torch.sqrt(diag) + eps)
     return vecs @ torch.diag_embed(inv_sqrt) @ vecs.mT
@@ -256,8 +342,8 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], cova
     Triangulate multiple points using multiple camera views. This is similar
     to `triangulate`, but the points must have be undistorted beforehand.
 
-    >>> cam1 = Camera(translation=torch.tensor([-0.9, 0.0, 0.0]))
-    >>> cam2 = Camera(translation=torch.tensor([1.1, 0.0, 0.0]))
+    >>> cam1 = Camera(translation=torch.tensor([0.9, 0.0, 0.0]))
+    >>> cam2 = Camera(translation=torch.tensor([-1.1, 0.0, 0.0]))
     >>> p1 = torch.tensor([1.0, 0.1])
     >>> p2 = torch.tensor([-1.0, 0.1])
     >>> res = triangulate_undistorted([cam1, cam2], [p1, p2])
@@ -268,7 +354,7 @@ def triangulate_undistorted(cams: list[Camera], points: list[torch.Tensor], cova
     """
     mats = []
     vec = []
-    for cam, pts, cov in zip(cams, points, covars or [None for _ in range(len(cams))]):
+    for cam, pts, cov in zip(cams, points, covars or [None for _ in cams]):
         r, t = cam.rotation, cam.translation
         A = r[0:2] - pts.unsqueeze(-1) * r[2]
         b = (pts * t[2] - t[0:2]).unsqueeze(-1)
@@ -290,8 +376,8 @@ def triangulate(cams: list[Camera], points: list[torch.Tensor]) -> torch.Tensor:
     number of batch dimensions in front. The output will have the same batch
     dimensions but a final dimension of size 3.
 
-    >>> cam1 = Camera(translation=torch.tensor([-1.1, 0.0, 0.0]))
-    >>> cam2 = Camera(translation=torch.tensor([0.9, 0.0, 0.0]))
+    >>> cam1 = Camera(translation=torch.tensor([1.1, 0.0, 0.0]))
+    >>> cam2 = Camera(translation=torch.tensor([-0.9, 0.0, 0.0]))
     >>> p1 = torch.tensor([1.0, -0.1])
     >>> p2 = torch.tensor([-1.0, -0.1])
     >>> res = triangulate([cam1, cam2], [p1, p2])
