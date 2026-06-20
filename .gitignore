@@ -14,7 +14,7 @@ submission*
 *.mp4
 *.avi
 
-### Latex ###
+# Latex
 *.synctex.gz
 *.aux
 *.fls
