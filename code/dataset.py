@@ -5,6 +5,7 @@ import json
 import zipfile
 import tarfile
 import urllib.request
+import multiprocessing
 
 import gdown
 import torch
@@ -92,50 +93,6 @@ class SalsaDataset:
         return source.OfflineVideoSource(streams, cameras)
 
 
-class H3wbDataset:
-    """ Class for handling the H3WB dataset (https://github.com/wholebody3d/wholebody3d). """
-
-    fps = 10
-
-    def __init__(self, path: str = "./data/h3wb"):
-        """ Create an instance of the class with the data stored in the given directory. """
-        self.path = path
-
-    def download(self):
-        """
-        Download the dataset from Google Drive. Download is skipped if already present.
-        Note that we only download the annotations, not the images. This means
-        this dataset can be used in this project only for the training of the
-        learnable Kalman filter, not for end-to-end evaluation.
-        """
-        os.makedirs(self.path, exist_ok=True)
-        gdown.cached_download(  # type: ignore
-            id="1LZh4Jsg3_ZKBF0iEPiexzoGHE4srLgfC", path=f"{self.path}/h3wb_train.npz")
-
-
-class D3pwDataset:
-    """ Class for handling the 3DPW dataset (https://virtualhumans.mpi-inf.mpg.de/3DPW/). """
-
-    endpoint: str = "https://virtualhumans.mpi-inf.mpg.de/3DPW"
-    fps = 30
-
-    def __init__(self, path: str = "./data/3dpw"):
-        """ Create an instance of the class with the data stored in the given directory. """
-        self.path = path
-
-    @property
-    def scenes(self) -> list[str]:
-        return os.listdir(f"{self.path}/imageFiles")
-
-    def download(self):
-        """ Download the dataset from official source. Download is skipped if already present. """
-        os.makedirs(self.path, exist_ok=True)
-        if not os.path.exists(f"{self.path}/imageFiles"):
-            download_zip(self.path, f"{self.endpoint}/imageFiles.zip")
-        if not os.path.exists(f"{self.path}/sequenceFiles"):
-            download_zip(self.path, f"{self.endpoint}/sequenceFiles.zip")
-
-
 class CmuPanopticDataset:
     """ Class for handling the CMU Panoptic dataset (http://domedb.perception.cs.cmu.edu/index.html). """
 
@@ -169,11 +126,12 @@ class CmuPanopticDataset:
         "161029_build1", "161029_sports1",
     ]
     val_scenes: list[str] = [
-        '171204_pose5', '171026_pose2', '170221_haggling_m2', '170224_haggling_b2',
-        '170228_haggling_b2', '170404_haggling_b2', '161029_piano3',
+        "171204_pose5", "171026_pose2", "170221_haggling_m2", "170224_haggling_b2",
+        "170228_haggling_b2", "170404_haggling_b2", "161029_piano3", "160906_ian2",
     ]
     test_scenes: list[str] = [
-        "171204_pose6", "161029_piano4", "170915_office1", "161029_build1", "160224_haggling1",
+        "171026_pose3", "160906_ian1", "170915_office1", "161029_build1",
+        "160224_haggling1", "160906_pizza1", "170221_haggling_m3", "161029_sports1"
     ]
     vga_panels = [
         1, 19, 14, 6, 16, 9, 5, 10, 18, 15, 3, 8, 4, 20, 11, 13, 7, 2, 17, 12, 9, 5, 6, 3, 15, 2, 12, 14, 16, 10, 4, 13, 20, 8, 17, 19,
@@ -256,8 +214,11 @@ class CmuPanopticDataset:
     def download(self, num_hd_cams: int = 0, num_vga_cams: int = 4, scenes: None | list[str] = None):
         """ Download the dataset from official source. Download is skipped if already present. """
         os.makedirs(self.path, exist_ok=True)
-        for scene in scenes or self.scenes:
-            self.download_scene(scene, num_hd_cams, num_vga_cams)
+        args = [(scene, num_hd_cams, num_vga_cams)
+                for scene in scenes or self.scenes]
+        with multiprocessing.Pool() as pool:
+            for _ in pool.starmap(self.download_scene, args):
+                pass
 
     def load_cam(self, calib, name: str) -> Camera:
         cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
