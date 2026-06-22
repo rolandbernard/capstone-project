@@ -2,13 +2,17 @@
 import os
 import io
 import json
+import random
 import zipfile
 import tarfile
 import urllib.request
 import multiprocessing
+from itertools import count
 
+import cv2
 import gdown
 import torch
+from torch.utils.data import Dataset
 
 import source
 from camera import Camera
@@ -277,3 +281,120 @@ class CmuPanopticDataset:
                 ])
             last_idx = idx
         return cameras, frames, self.vga_fps
+
+    def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 25):
+        scene_path = f"{self.path}/{scene}"
+        ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
+        videos = [f for f in os.listdir(scene_path)
+                  if f.startswith("vga_") and f.endswith(".mp4")]
+        with open(f"{scene_path}/calibration.json") as f:
+            calib = json.load(f)
+        cams = [self.load_cam(calib, v[4:-4]) for v in videos]
+        caps = [cv2.VideoCapture(f"{scene_path}/{v}") for v in videos]
+        try:
+            for i in count():
+                frames = []
+                for cap in caps:
+                    ret, frame = cap.read()
+                    if not ret:
+                        return
+                    frames.append(frame)
+                if i % ith == 0 and os.path.exists(f"{ann_path}/body3DScene_{i:08d}.json"):
+                    with open(f"{ann_path}/body3DScene_{i:08d}.json") as f:
+                        ann = json.load(f)
+                    if len(ann["bodies"]) > 0:
+                        idx = random.randint(0, len(frames) - 1)
+                        cv2.imwrite(f"{path}/{scene}_{i}.jpg", frames[idx])
+                        with open(f"{path}/{scene}_{i}.json", "w") as f:
+                            json.dump([
+                                {
+                                    "id": b["id"],
+                                    "kpts": torch.concat([
+                                        cams[idx].project(
+                                            torch.tensor(b["joints19"])
+                                            .view(19, 4)[self.coco17_indices, :3]
+                                        ),
+                                        torch.tensor(b["joints19"])
+                                        .view(19, 4)[self.coco17_indices, 3:4]
+                                    ], dim=1).tolist(),
+                                } for b in ann["bodies"]
+                            ], f)
+        finally:
+            for cap in caps:
+                cap.release()
+
+    def cleanup_yolo_dataset(self, path: str):
+        """ Remove from the dataset all samples that have undesirable characteristics. """
+        for file in os.listdir(path):
+            if file.endswith(".json"):
+                with open(f"{path}/{file}") as f:
+                    ann = json.load(f)
+                if any(any(not (-640 < c[0] < 1280 and -480 < c[1] < 960 and 0.0 <= c[2] <= 1.0) for c in b["kpts"]) for b in ann):
+                    os.remove(f"{path}/{file}")
+                    os.remove(f"{path}/{file[:-5]}.jpg")
+
+    def extract_yolo_dataset(self, path: str = "./data/yolo"):
+        """
+        Extract from the dataset a set of images and annotations that can be used
+        to fine-tune the custom YOLO26 based pose estimation model.
+        """
+        os.makedirs(f"{path}/train", exist_ok=True)
+        os.makedirs(f"{path}/val", exist_ok=True)
+        for scene in self.scenes:
+            if scene not in self.test_scenes and self.is_valid_scene(scene):
+                if scene in self.val_scenes:
+                    self.extract_scene_yolo_dataset(scene, f"{path}/val")
+                else:
+                    self.extract_scene_yolo_dataset(scene, f"{path}/train")
+        self.cleanup_yolo_dataset(f"{path}/train")
+        self.cleanup_yolo_dataset(f"{path}/val")
+
+    def extract_scene_kalman_dataset(self, scene: str, path: str, use_hd: bool):
+        scene_path = f"{self.path}/{scene}"
+        ann_path = f"{scene_path}/{"hd" if use_hd else "vga"}Pose3d_stage1_coco19"
+        if os.path.exists(ann_path):
+            raise NotImplementedError
+
+    def extract_kalman_dataset(self, path: str = "./data/kalman", use_hd=False):
+        """
+        Extract from the dataset a set of single person tracks that can be used
+        for learning the Kalman filter parameters from real data.
+        """
+        os.makedirs(f"{path}/train", exist_ok=True)
+        os.makedirs(f"{path}/val", exist_ok=True)
+        for scene in self.scenes:
+            if scene not in self.test_scenes:
+                if scene in self.val_scenes:
+                    self.extract_scene_kalman_dataset(
+                        scene, f"{path}/val", use_hd)
+                else:
+                    self.extract_scene_kalman_dataset(
+                        scene, f"{path}/train", use_hd)
+
+
+class YoloDataset(Dataset):
+    """
+    Dataset yielding the individual frames from the yolo dataset extracted from
+    the CMU Panoptic sequences. It loads both the image and annotations.
+    """
+
+    def __init__(self, root_dir: str = "./data/yolo/train"):
+        self.root_dir = root_dir
+        self.files = sorted(
+            (f for f in os.listdir(root_dir) if f.endswith(".jpg")))
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        img_file = self.files[idx]
+        img = cv2.imread(f"{self.root_dir}/{img_file}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # type: ignore
+        img = torch.from_numpy(img)
+        img = img.permute(2, 0, 1)
+        img = img.to(torch.float32) / 255.0
+        with open(f"{self.root_dir}/{img_file[:-4]}.json") as f:
+            an = json.load(f)[:10]
+        ann = torch.zeros(10, 17, 3)
+        ann[:len(an)] = torch.tensor([b["kpts"] for b in an])  # type: ignore
+        return img, ann
