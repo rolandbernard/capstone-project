@@ -282,7 +282,16 @@ class CmuPanopticDataset:
             last_idx = idx
         return cameras, frames, self.vga_fps
 
+    def is_valid_yolo_sample(self, kpts: torch.Tensor) -> bool:
+        """ Check whether the given keypoints would be acceptable for a dataset sample. """
+        return (
+            (kpts[:, :, 0] > -640) & (kpts[:, :, 0] < 1280)
+            & (kpts[:, :, 1] > -480) & (kpts[:, :, 1] < 960)
+            & (kpts[:, :, 2] >= 0.0) & (kpts[:, :, 2] <= 1.0)
+        ).all()  # type: ignore
+
     def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 25):
+        """ Extract YOLO dataset samples from a single scene. """
         scene_path = f"{self.path}/{scene}"
         ann_path = f"{scene_path}/vgaPose3d_stage1_coco19"
         videos = [f for f in os.listdir(scene_path)
@@ -296,42 +305,35 @@ class CmuPanopticDataset:
                 frames = []
                 for cap in caps:
                     ret, frame = cap.read()
-                    if not ret:
-                        return
-                    frames.append(frame)
+                    if ret:
+                        frames.append(frame)
+                    else:
+                        frames.append(None)
                 if i % ith == 0 and os.path.exists(f"{ann_path}/body3DScene_{i:08d}.json"):
                     with open(f"{ann_path}/body3DScene_{i:08d}.json") as f:
                         ann = json.load(f)
                     if len(ann["bodies"]) > 0:
-                        idx = random.randint(0, len(frames) - 1)
-                        cv2.imwrite(f"{path}/{scene}_{i}.jpg", frames[idx])
-                        with open(f"{path}/{scene}_{i}.json", "w") as f:
-                            json.dump([
-                                {
-                                    "id": b["id"],
-                                    "kpts": torch.concat([
-                                        cams[idx].project(
-                                            torch.tensor(b["joints19"])
-                                            .view(19, 4)[self.coco17_indices, :3]
-                                        ),
-                                        torch.tensor(b["joints19"])
-                                        .view(19, 4)[self.coco17_indices, 3:4]
-                                    ], dim=1).tolist(),
-                                } for b in ann["bodies"]
-                            ], f)
+                        joints = torch.tensor([
+                            b["joints19"] for b in ann["bodies"]
+                        ]).view(-1, 19, 4)[:, self.coco17_indices]
+                        kpts = [
+                            torch.concat([
+                                cam.project(joints[..., :3]),
+                                joints[..., 3:4]
+                            ], dim=-1) for cam in cams]
+                        valid = [
+                            frame is not None and self.is_valid_yolo_sample(kp)
+                            for frame, kp in zip(frames, kpts)]
+                        if any(valid):
+                            idx = random.randint(0, len(frames) - 1)
+                            while not valid[idx]:
+                                idx = random.randint(0, len(frames) - 1)
+                            cv2.imwrite(f"{path}/{scene}_{i}.jpg", frames[idx])
+                            with open(f"{path}/{scene}_{i}.json", "w") as f:
+                                json.dump(kpts[idx].tolist(), f)
         finally:
             for cap in caps:
                 cap.release()
-
-    def cleanup_yolo_dataset(self, path: str):
-        """ Remove from the dataset all samples that have undesirable characteristics. """
-        for file in os.listdir(path):
-            if file.endswith(".json"):
-                with open(f"{path}/{file}") as f:
-                    ann = json.load(f)
-                if any(any(not (-640 < c[0] < 1280 and -480 < c[1] < 960 and 0.0 <= c[2] <= 1.0) for c in b["kpts"]) for b in ann):
-                    os.remove(f"{path}/{file}")
-                    os.remove(f"{path}/{file[:-5]}.jpg")
 
     def extract_yolo_dataset(self, path: str = "./data/yolo"):
         """
@@ -346,8 +348,6 @@ class CmuPanopticDataset:
                     self.extract_scene_yolo_dataset(scene, f"{path}/val")
                 else:
                     self.extract_scene_yolo_dataset(scene, f"{path}/train")
-        self.cleanup_yolo_dataset(f"{path}/train")
-        self.cleanup_yolo_dataset(f"{path}/val")
 
     def extract_scene_kalman_dataset(self, scene: str, path: str, use_hd: bool):
         scene_path = f"{self.path}/{scene}"

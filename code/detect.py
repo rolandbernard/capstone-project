@@ -258,7 +258,7 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse, threshold: float = 0.0, e
             * b_gt[:, :, 2].unsqueeze(0)
         cost_matrix = torch.sum(torch.sum(dist_matrix, dim=-1) * weight, dim=-1) \
             / (torch.sum(weight, dim=-1) + eps)
-        # 6. Hungarian Matching (Push to CPU only for the solver)
+        # Hungarian Matching (Push to CPU only for the solver)
         cost_np = cost_matrix.cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
         matched_pred_indices = valid_idx[row_idx]
