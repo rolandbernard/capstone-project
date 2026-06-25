@@ -284,11 +284,16 @@ class CmuPanopticDataset:
 
     def is_valid_yolo_sample(self, kpts: torch.Tensor) -> bool:
         """ Check whether the given keypoints would be acceptable for a dataset sample. """
-        return (
-            (kpts[:, :, 0] > -640) & (kpts[:, :, 0] < 1280)
-            & (kpts[:, :, 1] > -480) & (kpts[:, :, 1] < 960)
-            & (kpts[:, :, 2] >= 0.0) & (kpts[:, :, 2] <= 1.0)
-        ).all()  # type: ignore
+        return \
+            ((
+                (kpts[:, :, 0] > 0) & (kpts[:, :, 0] < 640)
+                & (kpts[:, :, 1] > 0) & (kpts[:, :, 1] < 480)
+            ).sum(dim=1) > 6).any() and \
+            (
+                (kpts[:, :, 0] > -640) & (kpts[:, :, 0] < 1280)
+                & (kpts[:, :, 1] > -480) & (kpts[:, :, 1] < 960)
+                & (kpts[:, :, 2] >= 0.0) & (kpts[:, :, 2] <= 1.0)
+            ).all()  # type: ignore
 
     def extract_scene_yolo_dataset(self, scene: str, path: str, ith: int = 25):
         """ Extract YOLO dataset samples from a single scene. """
@@ -309,6 +314,8 @@ class CmuPanopticDataset:
                         frames.append(frame)
                     else:
                         frames.append(None)
+                if all(frame is None for frame in frames):
+                    break
                 if i % ith == 0 and os.path.exists(f"{ann_path}/body3DScene_{i:08d}.json"):
                     with open(f"{ann_path}/body3DScene_{i:08d}.json") as f:
                         ann = json.load(f)
@@ -396,5 +403,5 @@ class YoloDataset(Dataset):
         with open(f"{self.root_dir}/{img_file[:-4]}.json") as f:
             an = json.load(f)[:10]
         ann = torch.zeros(10, 17, 3)
-        ann[:len(an)] = torch.tensor([b["kpts"] for b in an])  # type: ignore
+        ann[:len(an)] = torch.tensor(an)
         return img, ann
