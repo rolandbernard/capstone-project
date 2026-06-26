@@ -247,19 +247,12 @@ class CmuPanopticDataset:
             cameras.append(self.load_cam(calib, name))
         return source.OfflineVideoSource(streams, cameras)
 
-    def load_ground_truth_vga(self, scene: str, num_vga_cams: int = 4) -> tuple[list[Camera], list[list], float]:
+    def load_ground_truth_annotation(self, ann_path: str) -> list[list]:
         """
-        Load the ground truth data in the same format as produced in the evaluation
-        application of the tracking system. This can be used to perform evaluation.
-        For visualization purposes it also generates the first few camera positions.
+        Load all annotations from the given directory into an ordered list of
+        frames. Each frame in the list contains all bodies contained in the
+        annotations for that point in time.
         """
-        with open(f"{self.path}/{scene}/calibration.json") as f:
-            calib = json.load(f)
-        cameras = []
-        for i in range(num_vga_cams):
-            name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
-            cameras.append(self.load_cam(calib, name))
-        ann_path = f"{self.path}/{scene}/vgaPose3d_stage1_coco19"
         files = sorted(f for f in os.listdir(ann_path))
         last_idx = -1
         frames = []
@@ -280,6 +273,22 @@ class CmuPanopticDataset:
                     } for b in ann["bodies"]
                 ])
             last_idx = idx
+        return frames
+
+    def load_ground_truth_vga(self, scene: str, num_vga_cams: int = 4) -> tuple[list[Camera], list[list], float]:
+        """
+        Load the ground truth data in the same format as produced in the evaluation
+        application of the tracking system. This can be used to perform evaluation.
+        For visualization purposes it also generates the first few camera positions.
+        """
+        with open(f"{self.path}/{scene}/calibration.json") as f:
+            calib = json.load(f)
+        cameras = []
+        for i in range(num_vga_cams):
+            name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
+            cameras.append(self.load_cam(calib, name))
+        ann_path = f"{self.path}/{scene}/vgaPose3d_stage1_coco19"
+        frames = self.load_ground_truth_annotation(ann_path)
         return cameras, frames, self.vga_fps
 
     def is_valid_yolo_sample(self, kpts: torch.Tensor) -> bool:
@@ -356,13 +365,31 @@ class CmuPanopticDataset:
                 else:
                     self.extract_scene_yolo_dataset(scene, f"{path}/train")
 
-    def extract_scene_kalman_dataset(self, scene: str, path: str, use_hd: bool):
+    def extract_scene_kalman_dataset(self, scene: str, path: str, min_len: int, use_hd: bool):
         scene_path = f"{self.path}/{scene}"
-        ann_path = f"{scene_path}/{"hd" if use_hd else "vga"}Pose3d_stage1_coco19"
+        kind = "hd" if use_hd else "vga"
+        ann_path = f"{scene_path}/{kind}Pose3d_stage1_coco19"
         if os.path.exists(ann_path):
-            raise NotImplementedError
+            next_id = 0
+            tracks = {}
+            frames = self.load_ground_truth_annotation(ann_path)
+            for frame in frames:
+                found = set()
+                for body in frame:
+                    id, kpts, conf = body["id"], body["kpts"], body["conf"]
+                    if all(c > 0.05 for c in conf):
+                        found.add(id)
+                        if id not in tracks:
+                            tracks[id] = []
+                        tracks[id].append(kpts)
+                for id in [id for id in tracks.keys() if id not in found]:
+                    if len(tracks[id]) >= min_len:
+                        with open(f"{path}/{scene}_{next_id}_{kind}_{len(tracks[id])}.json", "w") as f:
+                            json.dump(tracks[id], f)
+                        next_id += 1
+                    del tracks[id]
 
-    def extract_kalman_dataset(self, path: str = "./data/kalman", use_hd=False):
+    def extract_kalman_dataset(self, path: str = "./data/kalman", min_len: int = 50):
         """
         Extract from the dataset a set of single person tracks that can be used
         for learning the Kalman filter parameters from real data.
@@ -371,12 +398,13 @@ class CmuPanopticDataset:
         os.makedirs(f"{path}/val", exist_ok=True)
         for scene in self.scenes:
             if scene not in self.test_scenes:
-                if scene in self.val_scenes:
-                    self.extract_scene_kalman_dataset(
-                        scene, f"{path}/val", use_hd)
-                else:
-                    self.extract_scene_kalman_dataset(
-                        scene, f"{path}/train", use_hd)
+                for use_hd in [False, True]:
+                    if scene in self.val_scenes:
+                        self.extract_scene_kalman_dataset(
+                            scene, f"{path}/val", min_len, use_hd)
+                    else:
+                        self.extract_scene_kalman_dataset(
+                            scene, f"{path}/train", min_len, use_hd)
 
 
 class YoloDataset(Dataset):
