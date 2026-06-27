@@ -260,18 +260,21 @@ class CmuPanopticDataset:
             idx = int(files[0][12:-5])
             frames.extend([[]] * (idx - last_idx - 1))
             with open(f"{ann_path}/{file}") as f:
-                ann = json.load(f)
-                frames.append([
-                    {
-                        "id": b["id"],
-                        "kpts": torch.tensor(b["joints19"])
-                        .view(19, 4)[self.coco17_indices, :3]
-                        .tolist(),
-                        "conf": torch.tensor(b["joints19"])
-                        .view(19, 4)[self.coco17_indices, 3]
-                        .tolist(),
-                    } for b in ann["bodies"]
-                ])
+                try:
+                    ann = json.load(f)
+                    frames.append([
+                        {
+                            "id": b["id"],
+                            "kpts": torch.tensor(b["joints19"])
+                            .view(19, 4)[self.coco17_indices, :3]
+                            .tolist(),
+                            "conf": torch.tensor(b["joints19"])
+                            .view(19, 4)[self.coco17_indices, 3]
+                            .tolist(),
+                        } for b in ann["bodies"]
+                    ])
+                except:
+                    print(f"warning: skipped {ann_path}/{file}")
             last_idx = idx
         return frames
 
