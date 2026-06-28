@@ -436,3 +436,40 @@ class YoloDataset(Dataset):
         ann = torch.zeros(10, 17, 3)
         ann[:len(an)] = torch.tensor(an)
         return img, ann
+
+
+class KalmanDataset(Dataset):
+    """
+    Dataset yielding the short segments of ground truth tracks extracted from
+    the CMU Panoptic dataset. Each sequence is associated with a framerate which
+    might also have been derived by optional downsampling of the original.
+    """
+
+    def __init__(
+        self, root_dir: str = "./data/kalman/train", seq_len: int = 50,
+        stride: int = 25, downsample: list[int] = [1, 2, 3]
+    ):
+        self.root_dir = root_dir
+        self.seq_len = seq_len
+        self.stride = stride
+        self.downsample = downsample
+        files = sorted(
+            (f for f in os.listdir(root_dir) if f.endswith(".json")))
+        self.samples = []
+        for file in files:
+            kind, length = file.split("_")[-2:]
+            length = int(length.split(".")[0])
+            fps = CmuPanopticDataset.hd_fps if kind == "hd" else CmuPanopticDataset.vga_fps
+            for down in downsample:
+                for start in range(0, (length // down) - seq_len + 1, stride):
+                    self.samples.append((file, fps, down, start))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        file, fps, down, start = self.samples[idx]
+        with open(f"{self.root_dir}/{file}") as f:
+            ann = json.load(f)
+        track = torch.tensor(ann[start:start + self.seq_len*down:down])
+        return torch.tensor(fps), track
