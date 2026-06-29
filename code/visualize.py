@@ -43,7 +43,7 @@ class BaseSkeletonPlayer:
 
     def approx_scale(self, cameras: list):
         """ Estimate the scale of the scene based on camera positions. """
-        max_dist = 1e-5
+        max_dist = 1e-5 if len(cameras) > 0 else 300
         centers = []
         for cam in cameras:
             center = -np.array(cam["R"]).T @ np.array(cam["t"]).flatten()
@@ -277,6 +277,18 @@ class SkeletonPlayer(BaseSkeletonPlayer):
         """ Show the plotter by opening the window. """
         pv.set_jupyter_backend('client')
         self.pl.show()
+
+
+class MinimalSkeletonPlayer(SkeletonPlayer):
+    """
+    Offline skeleton player for a single pre-recorded track.
+    """
+
+    def __init__(self, track, fps: float, center=(0, 0, 0), up=(0, -1, 0)):
+        super().__init__(
+            [], [[{"id": 0, "kpts": frame}] for frame in track],
+            fps, center, up
+        )
 
 
 class LiveSkeletonPlayer(BaseSkeletonPlayer):
