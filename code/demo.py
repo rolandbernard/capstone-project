@@ -14,7 +14,7 @@ from detect import PoseDetector
 from source import OfflineVideoSource, OnlineVideoSource
 from tracker import (
     CrossViewFirstTracker, Tracker,
-    build_constrained_physics, build_physics,
+    build_constrained_physics, build_walled_physics, build_physics,
 )
 from visualize import LiveSkeletonPlayer, show_cv2_images
 
@@ -347,6 +347,8 @@ if __name__ == "__main__":
                         help="Use LoFTR for camera estimation")
     parser.add_argument("--no-constraint", action="store_true",
                         help="Do not use rigid body constraints")
+    parser.add_argument("--use-walled", action="store_true",
+                        help="Use walled physics constraints")
     parser.add_argument("--cross-first", action="store_true",
                         help="Match using cross-view association first")
     parser.add_argument("--no-cloud", action="store_true",
@@ -412,8 +414,9 @@ if __name__ == "__main__":
         source.to(util.DEVICE)
         detector = PoseDetector()
         detector.to(util.DEVICE)
-        physics = build_physics(1.0) \
-            if args.no_constraint else build_constrained_physics(1.0)
+        physics = build_physics(1.0) if args.no_constraint \
+            else build_walled_physics(1.0) if args.use_walled \
+            else build_constrained_physics(1.0)
         physics.to(util.DEVICE)
         tracker_cls = CrossViewFirstTracker if args.cross_first else Tracker
         tracker = tracker_cls(detector, physics)
