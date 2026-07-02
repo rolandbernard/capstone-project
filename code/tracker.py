@@ -260,9 +260,6 @@ class Tracker:
         self.last_id += 1
         full_mean = self.physics.init_mean.clone()
         full_mean[:self.num_keypoint*3] = mean
-        if isinstance(self.physics, ConstrainedPhysics):
-            full_mean[self.physics.constraints[2]] \
-                = self.physics.compute_distances(mean)
         full_cov = self.physics.init_cov.clone()
         return Track(self.last_id, full_mean, full_cov, self.num_keypoint)
 
@@ -276,8 +273,7 @@ class Tracker:
         if isinstance(self.physics, ConstrainedPhysics):
             ob_fs.append(lambda x: self.physics.pseudo_obs(x))  # type: ignore
             # Constraints are supposed to have zero difference.
-            ob_ms.append(torch.zeros(
-                self.physics.num_constr, device=track.mean.device))
+            ob_ms.append(self.physics.constr_val)
             ob_vs.append(self.physics.constr_cov)
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         mean, cov = kalman.eupdate(track.mean, track.cov, ob_m, ob_v, ob_f)

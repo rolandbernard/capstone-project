@@ -60,7 +60,8 @@ class ConstrainedPhysics(LinearPhysics):
         self.point_mix = point_mix
         self.num_keypoint = num_keypoint
         self.constr_cov = constr_cov
-        self.num_constr = constraints.shape[1]
+        self.constr_val = torch.zeros(
+            constraints.shape[1], device=dyn_mat.device)
 
     def compute_keypoints(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the augmented points on which constraints are defined. """
@@ -91,6 +92,7 @@ class ConstrainedPhysics(LinearPhysics):
         self.constraints = self.constraints.to(*args, **kargs)
         self.point_mix = self.point_mix.to(*args, **kargs)
         self.constr_cov = self.constr_cov.to(*args, **kargs)
+        self.constr_val = self.constr_val.to(*args, **kargs)
         return self
 
 
@@ -113,9 +115,12 @@ class WalledPhysics(ConstrainedPhysics):
         self.wall_centers = wall_centers
         self.wall_norm = wall_norm
         self.feet_idx = feet_idx
-        self.feet_height = feet_height
-        self.num_constr = constraints.shape[1] \
-            + num_keypoint * wall_centers.shape[0] + feet_idx.shape[1]
+        self.constr_val = torch.concat([
+            self.constr_val,
+            torch.zeros(
+                num_keypoint * wall_centers.shape[0], device=dyn_mat.device),
+            torch.ones(feet_idx.shape[1], device=dyn_mat.device) * feet_height
+        ])
 
     def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the constraint violation. """
@@ -127,8 +132,7 @@ class WalledPhysics(ConstrainedPhysics):
         return torch.concat([
             super().pseudo_obs(x),
             torch.nn.functional.relu(-w_dist.view(*Bs, -1)),
-            w_dist[..., self.feet_idx[0], self.feet_idx[1]].view(*Bs, -1)
-            - self.feet_height,
+            w_dist[..., self.feet_idx[0], self.feet_idx[1]].view(*Bs, -1),
         ], dim=-1)
 
     def to(self, *args, **kargs):
