@@ -3,6 +3,7 @@ from functools import lru_cache
 from typing import Callable
 
 import torch
+import torch.nn as nn
 
 
 class LinearPhysics:
@@ -141,6 +142,68 @@ class WalledPhysics(ConstrainedPhysics):
         self.wall_norm = self.wall_norm.to(*args, **kargs)
         self.feet_idx = self.feet_idx.to(*args, **kargs)
         return self
+
+
+class LearnedPhysics(nn.Module, WalledPhysics):
+    """
+    A physics model where parameters are designed to be explicitly learned by
+    means of gradient based optimization. The basic operations are the same as
+    that of the walled physics and this module can be initialized with an
+    instance `WalledPhysics`.
+    """
+
+    def __init__(self, init: WalledPhysics):
+        nn.Module.__init__(self)
+        self.get_dyn = lru_cache()(self._get_dyn)
+        self.num_keypoint = init.num_keypoint
+        self.dyn_mat = self.as_parameter(init.dyn_mat)
+        self.dyn_cov = self.as_parameter(init.dyn_cov)
+        self.init_mean = self.as_parameter(init.init_mean)
+        self.init_cov = self.as_parameter(init.init_cov)
+        self.constraints = self.as_parameter(
+            self.constraints_to_matrix(init.constraints, init.point_mix))
+        self.constr_cov = self.as_parameter(init.constr_cov)
+        self.constr_val = self.as_parameter(init.constr_val)
+        self.wall_centers = init.wall_centers
+        self.wall_norm = init.wall_norm
+        self.feet_mat = self.as_parameter(self.feet_to_matrix(init.feet_idx))
+
+    def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
+        """ Convert a static constraints index array to a matrix. """
+        mat = torch.zeros(
+            (4, constr.shape[0], self.dyn_mat.shape[0]), device=constr.device)
+        for i, (a, b, c) in enumerate(constr):
+            for dir, idx in [(1, a), (-1, b)]:
+                if idx < self.num_keypoint:
+                    mat[0:3, i, 3*idx:3*idx+3] = torch.eye(3) * dir
+                else:
+                    i0, i1 = mix[idx - self.num_keypoint]
+                    mat[0:3, i, 3*i0:3*i0+3] = torch.eye(3) * dir / 2
+                    mat[0:3, i, 3*i1:3*i1+3] = torch.eye(3) * dir / 2
+            mat[3, i, c] = 1
+        return mat
+
+    def feet_to_matrix(self, feet: torch.Tensor) -> torch.Tensor:
+        """ Convert a static feet index array to a matrix. """
+        mat = torch.zeros(
+            (feet.shape[0], self.num_keypoint * self.wall_norm.shape[0]),
+            device=feet.device)
+        for i, (a, b) in enumerate(feet):
+            mat[i, self.num_keypoint*b + a] = 1
+        return mat
+
+    def as_parameter(self, x: torch.Tensor) -> nn.Parameter:
+        """ Wrap a tensor in a PyTorch parameter node. """
+        x.requires_grad = True
+        return nn.Parameter(x)
+
+    def compute_distances(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constrained distances. """
+        pass
+
+    def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constraint violation. """
+        pass
 
 
 def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
