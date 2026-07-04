@@ -520,7 +520,7 @@ def build_constrained_physics(scale=100.0, sym=True) -> kalman.ConstrainedPhysic
         dyn_mat, dyn_cov, init_mean, init_cov, constraints, point_mix, constr_cov)
 
 
-def build_walled_physics(scale=100.0, sym=True, center=(0, 0, 0), up=(0, -1, 0)) -> kalman.ConstrainedPhysics:
+def build_walled_physics(scale=100.0, sym=True, center=(0, 0, 0), up=(0, -1, 0)) -> kalman.WalledPhysics:
     """ Build physics that includes limb length and wall/floor constraints. """
     links = util.RIGID_SKELETON
     nkp, nk, num_links = 17, 17*3, len(links)

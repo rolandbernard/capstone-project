@@ -171,13 +171,13 @@ class LearnedPhysics(nn.Module, WalledPhysics):
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
         """ Convert a static constraints index array to a matrix. """
         mat = torch.zeros(
-            (4, constr.shape[0], self.dyn_mat.shape[0]), device=constr.device)
-        for i, (a, b, c) in enumerate(constr):
+            (4, constr.shape[1], self.dyn_mat.shape[0]), device=constr.device)
+        for i, (a, b, c) in enumerate(constr.T):
             for dir, idx in [(1, a), (-1, b)]:
                 if idx < self.num_keypoint:
                     mat[0:3, i, 3*idx:3*idx+3] = torch.eye(3) * dir
                 else:
-                    i0, i1 = mix[idx - self.num_keypoint]
+                    i0, i1 = mix[:, idx - self.num_keypoint]
                     mat[0:3, i, 3*i0:3*i0+3] = torch.eye(3) * dir / 2
                     mat[0:3, i, 3*i1:3*i1+3] = torch.eye(3) * dir / 2
             mat[3, i, c] = 1
@@ -186,9 +186,9 @@ class LearnedPhysics(nn.Module, WalledPhysics):
     def feet_to_matrix(self, feet: torch.Tensor) -> torch.Tensor:
         """ Convert a static feet index array to a matrix. """
         mat = torch.zeros(
-            (feet.shape[0], self.num_keypoint * self.wall_norm.shape[0]),
+            (feet.shape[1], self.num_keypoint * self.wall_norm.shape[0]),
             device=feet.device)
-        for i, (a, b) in enumerate(feet):
+        for i, (a, b) in enumerate(feet.T):
             mat[i, self.num_keypoint*b + a] = 1
         return mat
 
@@ -199,11 +199,29 @@ class LearnedPhysics(nn.Module, WalledPhysics):
 
     def compute_distances(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the constrained distances. """
-        pass
+        *Bs, _ = x.shape
+        return torch.linalg.vector_norm(
+            (self.constraints[0:3] @ x.view(*Bs, 1, -1, 1)).view(*Bs, 3, -1), dim=-2)
+
+    def skeleton_constraints(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constraint violation for the skeleton constrains. """
+        *Bs, _ = x.shape
+        values = (self.constraints @ x.view(*Bs, 1, -1, 1)).view(*Bs, 4, -1)
+        dist = torch.linalg.vector_norm(values[..., 0:3, :], dim=-2)
+        return dist - values[..., 3, :]
 
     def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the constraint violation. """
-        pass
+        *Bs, _ = x.shape
+        points = x[:self.num_keypoint*3].view(*Bs, -1, 3)
+        w_dist = ((points.view(*Bs, -1, 1, 3) - self.wall_centers.view(*Bs, 1, -1, 3))
+                  .view(*Bs, -1, 1, 1, 3) @ self.wall_norm.view(*Bs, 1, -1, 3, 1)) \
+            .view(*Bs, -1)
+        return torch.concat([
+            self.skeleton_constraints(x),
+            torch.nn.functional.relu(-w_dist),
+            (self.feet_mat @ w_dist.unsqueeze(-1)).squeeze(-1),
+        ], dim=-1)
 
 
 def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
