@@ -164,8 +164,8 @@ class LearnedPhysics(nn.Module, WalledPhysics):
             self.constraints_to_matrix(init.constraints, init.point_mix))
         self.constr_cov = self.as_parameter(init.constr_cov)
         self.constr_val = self.as_parameter(init.constr_val)
-        self.wall_centers = init.wall_centers
-        self.wall_norm = init.wall_norm
+        self.wall_centers = nn.Parameter(init.wall_centers, requires_grad=False)
+        self.wall_norm = nn.Parameter(init.wall_norm, requires_grad=False)
         self.feet_mat = self.as_parameter(self.feet_to_matrix(init.feet_idx))
 
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
