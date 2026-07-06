@@ -243,7 +243,8 @@ if __name__ == "__main__":
             img_pts = []
             bgr_frames = []
             for frame in frames:
-                bgr_img = cv2.cvtColor(frame.cpu().numpy(), cv2.COLOR_RGB2BGR)
+                bgr_img = cv2.cvtColor(
+                    frame.detach().cpu().numpy(), cv2.COLOR_RGB2BGR)
                 gray_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
                 flags = cv2.CALIB_CB_ACCURACY + cv2.CALIB_CB_EXHAUSTIVE \
                     if record_next else 0
@@ -261,7 +262,7 @@ if __name__ == "__main__":
                 if args.save_imgs is not None:
                     for i, frame in enumerate(frames):
                         frame = cv2.cvtColor(
-                            frame.cpu().numpy(), cv2.COLOR_RGB2BGR)
+                            frame.detach().cpu().numpy(), cv2.COLOR_RGB2BGR)
                         cv2.imwrite(f"{args.save_imgs}/{iter}_{i}.jpg", frame)
             vis_frame = np.concat(bgr_frames)
             if vis_frame.shape[0] > 1000:

@@ -172,7 +172,7 @@ class Tracker:
             cost_matrix[:num_track, j] = dist + logdet \
                 - num_dim*self.mo_threshold
         # Run Hungarian matching.
-        cost_np = cost_matrix.cpu().numpy()
+        cost_np = cost_matrix.detach().cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
         # Filter out matches that matched with dummies.
         tr_idx = torch.tensor(row_idx, dtype=torch.long, device=kpts.device)
@@ -239,7 +239,7 @@ class Tracker:
                     - (num_dim * self.mn_threshold)
                 cost_matrix[t_idx, :] = avg_cost
             # Run Hungarian matching.
-            cost_np = cost_matrix.cpu().numpy()
+            cost_np = cost_matrix.detach().cpu().numpy()
             tr_idx, det_idx = scipy.optimize.linear_sum_assignment(cost_np)
             # Assign detections to active tracks and create new tracks.
             for t, d in zip(tr_idx, det_idx):
@@ -423,7 +423,7 @@ class CrossViewFirstTracker(Tracker):
                         count += 1
                 cost_matrix[:num_track, j] /= count
         # Run Hungarian matching.
-        cost_np = cost_matrix.cpu().numpy()
+        cost_np = cost_matrix.detach().cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
         self.add_time_stat("matching_old", t_start)
         # Update matched tracks or create a new one.
