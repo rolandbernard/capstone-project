@@ -68,8 +68,8 @@ def match_images_loftr(model, img1: torch.Tensor, img2: torch.Tensor) -> tuple[n
             "image0": img1_g.unsqueeze(0).unsqueeze(0).float() / 255.0,
             "image1": img2_g.unsqueeze(0).unsqueeze(0).float() / 255.0
         })
-    pts1 = correspondences["keypoints0"].cpu().numpy()
-    pts2 = correspondences["keypoints1"].cpu().numpy()
+    pts1 = correspondences["keypoints0"].detach().cpu().numpy()
+    pts2 = correspondences["keypoints1"].detach().cpu().numpy()
     return pts1, pts2
 
 
@@ -422,27 +422,28 @@ if __name__ == "__main__":
         tracker = tracker_cls(detector, physics)
         # Run the tracking loop and update the visualization.
         last_ts = ts
-        while True:
-            ts, frames, _ = source.next_frames()
-            if ts is None or frames is None:
-                break
-            dt = ts - last_ts
-            if dt <= 0:
-                # We don"t have any new frames available.
-                time.sleep(0.01)
-                continue
-            tracker.predict(dt)
-            tracker.update(cameras, frames)
-            last_ts = ts
-            player.update(tracker.get_prediction())
-            show_cv2_images(
-                cameras,
-                [cv2.cvtColor(f.cpu().numpy(), cv2.COLOR_RGB2BGR)
-                 for f in frames],
-                tracker.get_prediction()
-            )
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+        with torch.inference_mode():
+            while True:
+                ts, frames, _ = source.next_frames()
+                if ts is None or frames is None:
+                    break
+                dt = ts - last_ts
+                if dt <= 0:
+                    # We don"t have any new frames available.
+                    time.sleep(0.01)
+                    continue
+                tracker.predict(dt)
+                tracker.update(cameras, frames)
+                last_ts = ts
+                player.update(tracker.get_prediction())
+                show_cv2_images(
+                    cameras,
+                    [cv2.cvtColor(f.detach().cpu().numpy(), cv2.COLOR_RGB2BGR)
+                     for f in frames],
+                    tracker.get_prediction()
+                )
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
     else:
         while True:
             player.update([])

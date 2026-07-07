@@ -75,14 +75,13 @@ class PoseDetector:
         for P persons two tensors of shape (P, 17*2) for the positions of all 17
         keypoints and and a tensor of shape (P, 17*2, 17*2) for the covariance.
         """
-        with torch.inference_mode():
-            if isinstance(images, list):
-                images = torch.stack(images)
-            if images.shape[-1] == 3:
-                images = images.permute(0, 3, 1, 2)
-            if images.dtype == torch.uint8:
-                images = images.to(torch.float32) / 255.0
-            return self.detect_base(images)
+        if isinstance(images, list):
+            images = torch.stack(images)
+        if images.shape[-1] == 3:
+            images = images.permute(0, 3, 1, 2)
+        if images.dtype == torch.uint8:
+            images = images.to(torch.float32) / 255.0
+        return self.detect_base(images)
 
     def detect(self, cams: list[Camera], images: torch.Tensor | list[torch.Tensor]) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """
@@ -259,7 +258,7 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse, threshold: float = 0.0, e
         cost_matrix = torch.sum(torch.sum(dist_matrix, dim=-1) * weight, dim=-1) \
             / (torch.sum(weight, dim=-1) + eps)
         # Hungarian Matching (Push to CPU only for the solver)
-        cost_np = cost_matrix.cpu().numpy()
+        cost_np = cost_matrix.detach().cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
         matched_pred_indices = valid_idx[row_idx]
         preds.append(
