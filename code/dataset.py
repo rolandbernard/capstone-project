@@ -446,8 +446,8 @@ class KalmanDataset(Dataset):
     """
 
     def __init__(
-        self, root_dir: str = "./data/kalman/train", seq_len: int = 50,
-        stride: int = 25, downsample: list[int] = [1, 2, 3]
+        self, root_dir: str = "./data/kalman/train", seq_len: int = 100,
+        stride: int = 100, downsample: list[int] = [1, 2, 3]
     ):
         self.root_dir = root_dir
         self.seq_len = seq_len
