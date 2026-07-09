@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from ultralytics import YOLO
 from ultralytics.nn.tasks import PoseModel
-from ultralytics.nn.modules import Detect, Pose26, Conv
+from ultralytics.nn.modules import Conv
 import scipy.optimize
 
 import util
@@ -209,7 +209,7 @@ class CustomHeadedYolo(nn.Module):
         return pred
 
 
-def compute_nll(pred: torch.Tensor, gt: torch.Tensor, w_mse, w_thres=0.05) -> torch.Tensor:
+def compute_loss_base(pred: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thres=0.05) -> torch.Tensor:
     """
     Computes the weighted negative log likelihood loss for 2D Gaussian in the
     predictions against the ground truth.
@@ -230,7 +230,7 @@ def compute_nll(pred: torch.Tensor, gt: torch.Tensor, w_mse, w_thres=0.05) -> to
         + w_mse * torch.mean(torch.sum(diff*diff, dim=(-1, -2)) * w)
 
 
-def compute_loss(pred, gt: torch.Tensor, model, w_mse, threshold: float = 0.0, eps=1e-5):
+def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float = 0.0, eps=1e-5):
     """
     Compute the loss between the predictions and the ground truth. First, match
     the detections against the known ground truth and then compute the negative
@@ -266,10 +266,10 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse, threshold: float = 0.0, e
         gts.append(b_gt[col_idx])
     if len(preds) == 0:
         return torch.tensor(0.0, device=gt.device, requires_grad=True)
-    return compute_nll(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse)
+    return compute_loss_base(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse)
 
 
-def train_epoch(model, loader, optimizer, w_mse):
+def train_epoch(model, loader, optimizer, w_mse: float):
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -292,7 +292,7 @@ def train_epoch(model, loader, optimizer, w_mse):
     return total_loss / count
 
 
-def eval_epoch(model, loader, w_mse):
+def eval_epoch(model, loader, w_mse: float):
     """
     Run a single evaluation round over the given loader. This is intended to be
     used after each epoch to evaluate the performance on the validation set.
@@ -314,10 +314,10 @@ def eval_epoch(model, loader, w_mse):
 
 def train_epochs(nets: NetStorage, train, val, num_epochs: int, w_mse: float, callback=None):
     """
-    Perform a multiple training epochs, recoding the history of both training
+    Perform multiple training epochs, recoding the history of both training
     and validation loss in the given log directory. This will train using the
     saved optimizer, model, and learning rate schedule from the provided net
-    storage. Uses pixel-wise cross-entropy as the loss.
+    storage.
     """
     # Lower precision to benefit from certain hardware support.
     torch.set_float32_matmul_precision('high')
@@ -341,10 +341,10 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, w_mse: float, ca
 
 def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=0.0, testing=False, callback=None):
     """
-    Perform a multiple training epochs. This will initialize the net storage in
+    Perform multiple training epochs. This will initialize the net storage in
     case we are starting a fresh run, and resume the existing run otherwise. The
     optimizer and learning rate schedule will be initializer according to the
-    passed configuration. The test and train split are generated.
+    passed configuration.
     """
     util.set_seed(42)
     nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE))
