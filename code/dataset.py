@@ -228,6 +228,18 @@ class CmuPanopticDataset:
         cam_calib = [c for c in calib["cameras"] if c["name"] == name][0]
         return Camera.from_dict(cam_calib)
 
+    def get_some_cams(self, num_hd_cams: int = 0, num_vga_cams: int = 4) -> list[Camera]:
+        """ Load some cameras for any of the scenes. """
+        with open(f"{self.path}/{self.scenes[0]}/calibration.json") as f:
+            calib = json.load(f)
+        cameras = []
+        for i in range(num_hd_cams):
+            cameras.append(self.load_cam(calib, f"00_{i:02d}"))
+        for i in range(num_vga_cams):
+            name = f"{self.vga_panels[i]:02d}_{self.vga_nodes[i]:02d}"
+            cameras.append(self.load_cam(calib, name))
+        return cameras
+
     def get_source(self, scene: str, num_hd_cams: int = 0, num_vga_cams: int = 4) -> source.OfflineVideoSource:
         """
         Load one of the scenes from the dataset into a video source for further
