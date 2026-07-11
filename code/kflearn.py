@@ -12,14 +12,55 @@ from camera import Camera
 from util import NetStorage
 
 
-def simulate_kalman_filter(model, fps: torch.Tensor, track: torch.Tensor, cams: list[Camera]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def simulate_kalman_filter(
+    model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
+    cams: list[Camera], v_init=20.0, v_vis_min=5.0, v_vis_max=50.0, v_inv=1000
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
     are simulated by applying known normal noise to the true projections. The noise
     level itself is randomly generated. Large noise is added for invisible points.
     Predictions before and after update are returned for each time step.
     """
-    pass
+    *Bs, T, K, D = track.shape
+    pred0, covs0 = torch.empty((*Bs, T, K*D))
+    pred1, covs1 = torch.empty((*Bs, T, K*D, K*D))
+    means = model.init_mean.expand(*Bs, *model.init_mean.shape)
+    means[..., :K*D] = track[..., 0, :, :].view(*Bs, -1) \
+        + torch.randn(*Bs, K*D) * v_init
+    covs = model.init_cov.expand(*Bs, *model.init_cov.shape)
+    for t, gt in enumerate(track):
+        # Save pre-update prediction.
+        pred0[..., t], covs0[..., t] = means[..., :K*D], covs[..., :K*D, :K*D]
+        # Generate fake observations and perform update.
+        proj = [cam.project(gt) for cam in cams]
+        ncov = [
+            torch.where(
+                (pts[..., 0] > 0) & (pts[..., 0] < 640)
+                & (pts[..., 1] > 0) & (pts[..., 1] < 480),
+                v_vis_min + torch.rand_like(pts) * v_vis_max,
+                torch.full_like(pts, v_inv)
+            )
+            for pts in proj]
+        ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:K*D].view(-1, D)).flatten()
+                 for cam in cams]
+        ob_ms = [
+            cam.undistort_points(pts + torch.randn_like(pts) * cov)
+            for cam, pts, cov in zip(cams, proj, ncov)]
+        ob_vs = [
+            cam.undistort_covars(torch.diag(cov))
+            for cam, cov in zip(cams, ncov)]
+        ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
+        ob_ms.append(model.constr_val)
+        ob_vs.append(model.constr_cov)
+        ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
+        means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
+        # Save post-update prediction.
+        pred1[..., t], covs1[..., t] = means[..., :K*D], covs[..., :K*D, :K*D]
+        # Predict next state. (Only if not the last state.)
+        if t != T - 1:
+            pass
+    return pred0, covs0, pred1, covs1
 
 
 def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
