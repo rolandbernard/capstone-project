@@ -164,7 +164,8 @@ class LearnedPhysics(nn.Module, WalledPhysics):
             self.constraints_to_matrix(init.constraints, init.point_mix))
         self.constr_cov = self.as_parameter(init.constr_cov)
         self.constr_val = self.as_parameter(init.constr_val)
-        self.wall_centers = nn.Parameter(init.wall_centers, requires_grad=False)
+        self.wall_centers = nn.Parameter(
+            init.wall_centers, requires_grad=False)
         self.wall_norm = nn.Parameter(init.wall_norm, requires_grad=False)
         self.feet_mat = self.as_parameter(self.feet_to_matrix(init.feet_idx))
 
@@ -222,6 +223,31 @@ class LearnedPhysics(nn.Module, WalledPhysics):
             torch.nn.functional.relu(-w_dist),
             (self.feet_mat @ w_dist.unsqueeze(-1)).squeeze(-1),
         ], dim=-1)
+
+    def predict_train(self, dt: torch.Tensor, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply the internal prediction logic for training. This differs from
+        `predict` in that it does not cache the dynamic matrix and allows for
+        different time step per batch.
+        """
+        dyn_mat, dyn_cov = multi_discretize(dt, self.dyn_mat, self.dyn_cov)
+        return predict(mean, cov, dyn_mat, dyn_cov)
+
+
+def multi_discretize(dt: torch.Tensor, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
+    """
+    Discretize the given continuous-time matrices once for each time in `dt`.
+    This differs from `discretize` in that it computes one matrix per value in
+    `dt`, keeping the leading batch dimensions.
+    """
+    # Use a second order approximation for now.
+    N, N = dyn_mat.shape
+    dt = dt.unsqueeze(-1).unsqueeze(-1)
+    dyn_mat = torch.eye(N, device=dyn_mat.device) + dyn_mat * dt \
+        + dyn_mat @ dyn_mat * (dt * dt * 0.5)
+    dyn_cov = dyn_cov * dt \
+        + (dyn_mat @ dyn_cov + dyn_cov @ dyn_mat.mT) * (dt * dt * 0.5)
+    return dyn_mat, dyn_cov
 
 
 def discretize(dt: float, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):
