@@ -22,6 +22,7 @@ def simulate_kalman_filter(
     level itself is randomly generated. Large noise is added for invisible points.
     Predictions before and after update are returned for each time step.
     """
+    dt = 1.0 / fps
     *Bs, T, K, D = track.shape
     pred0, covs0 = torch.empty((*Bs, T, K*D))
     pred1, covs1 = torch.empty((*Bs, T, K*D, K*D))
@@ -59,7 +60,7 @@ def simulate_kalman_filter(
         pred1[..., t], covs1[..., t] = means[..., :K*D], covs[..., :K*D, :K*D]
         # Predict next state. (Only if not the last state.)
         if t != T - 1:
-            pass
+            means, covs = model.predict_train(dt, means, covs)
     return pred0, covs0, pred1, covs1
 
 
@@ -82,12 +83,13 @@ def train_epoch(model, loader, raw_data, optimizer, w_mse: float) -> float:
     model.train()
     total_loss = 0
     count = 0
+    cams = raw_data.get_some_cams()
     for fps, track in loader:
         fps = fps.to(model.device, non_blocking=True)
         track = track.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        pred0, covs0, pred1, covs1 = simulate_kalman_filter(
-            model, fps, track, raw_data.get_some_cams())
+        pred0, covs0, pred1, covs1 \
+            = simulate_kalman_filter(model, fps, track, cams)
         loss = compute_loss(pred0, covs0, track, w_mse) \
             + compute_loss(pred1, covs1, track, w_mse)
         loss.backward()
@@ -106,13 +108,14 @@ def eval_epoch(model, loader, raw_data, w_mse: float) -> float:
     model.eval()
     total_loss = 0
     count = 0
+    cams = raw_data.get_some_cams()
     # Disable gradients to save memory and compute.
     with torch.inference_mode():
         for fps, track in loader:
             fps = fps.to(model.device, non_blocking=True)
             track = track.to(model.device, non_blocking=True)
-            pred0, covs0, pred1, covs1 = simulate_kalman_filter(
-                model, fps, track, raw_data.get_some_cams())
+            pred0, covs0, pred1, covs1 \
+                = simulate_kalman_filter(model, fps, track, cams)
             loss = compute_loss(pred0, covs0, track, w_mse) \
                 + compute_loss(pred1, covs1, track, w_mse)
             total_loss += loss.item()
