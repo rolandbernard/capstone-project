@@ -71,7 +71,12 @@ def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
     of both a mean and a covariance matrix. The loss is a combination a MSE and
     a NLL term.
     """
-    pass
+    *Bs, T, K, D = gt.shape
+    gt_flat = gt.view(*Bs, T, K * D)
+    mse_loss = nn.functional.mse_loss(pred, gt_flat)
+    dist = torch.distributions.MultivariateNormal(pred, covs)
+    nll_loss = -dist.log_prob(gt_flat).mean()
+    return nll_loss + w_mse * mse_loss
 
 
 def train_epoch(model, loader, raw_data, optimizer, w_mse: float) -> float:
