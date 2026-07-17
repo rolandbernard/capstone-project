@@ -169,6 +169,10 @@ class LearnedPhysics(nn.Module, WalledPhysics):
         self.wall_norm = nn.Parameter(init.wall_norm, requires_grad=False)
         self.feet_mat = self.as_parameter(self.feet_to_matrix(init.feet_idx))
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
         """ Convert a static constraints index array to a matrix. """
         mat = torch.zeros(
@@ -232,6 +236,10 @@ class LearnedPhysics(nn.Module, WalledPhysics):
         """
         dyn_mat, dyn_cov = multi_discretize(dt, self.dyn_mat, self.dyn_cov)
         return predict(mean, cov, dyn_mat, dyn_cov)
+
+    def train_parameters(self):
+        """ Get the parameters that are supposed to be trained in the model. """
+        return self.parameters()
 
 
 def multi_discretize(dt: torch.Tensor, dyn_mat: torch.Tensor, dyn_cov: torch.Tensor):

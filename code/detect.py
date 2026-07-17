@@ -185,7 +185,7 @@ class CustomHeadedYolo(nn.Module):
         self.base_net.eval()
         return self
 
-    def extra_parameters(self):
+    def train_parameters(self):
         """
         Get the extra parameters that have been added by the custom head. During
         training we will be freezing all other parameters.
@@ -339,7 +339,7 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, w_mse: float, ca
         print("max epoch reached")
 
 
-def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=0.0, testing=False, callback=None):
+def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=1.0, testing=False, callback=None):
     """
     Perform multiple training epochs. This will initialize the net storage in
     case we are starting a fresh run, and resume the existing run otherwise. The

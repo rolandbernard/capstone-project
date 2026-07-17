@@ -24,21 +24,23 @@ def simulate_kalman_filter(
     """
     dt = 1.0 / fps
     *Bs, T, K, D = track.shape
-    pred0, covs0 = torch.empty((*Bs, T, K*D))
-    pred1, covs1 = torch.empty((*Bs, T, K*D, K*D))
-    means = model.init_mean.expand(*Bs, *model.init_mean.shape)
-    means[..., :K*D] = track[..., 0, :, :].view(*Bs, -1) \
-        + torch.randn(*Bs, K*D) * v_init
+    pred0, covs0, pred1, covs1 = [], [], [], []
+    means = torch.concat([
+        track[..., 0, :, :].view(*Bs, -1)
+        + torch.randn(*Bs, K*D, device=track.device) * v_init,
+        model.init_mean[K*D:].expand(*Bs, -1)
+    ], dim=-1)
     covs = model.init_cov.expand(*Bs, *model.init_cov.shape)
     for t, gt in enumerate(track):
         # Save pre-update prediction.
-        pred0[..., t], covs0[..., t] = means[..., :K*D], covs[..., :K*D, :K*D]
+        pred0.append(means[..., :K*D])
+        covs0.append(covs[..., :K*D, :K*D])
         # Generate fake observations and perform update.
         proj = [cam.project(gt) for cam in cams]
         ncov = [
             torch.where(
-                (pts[..., 0] > 0) & (pts[..., 0] < 640)
-                & (pts[..., 1] > 0) & (pts[..., 1] < 480),
+                ((pts[..., 0] > 0) & (pts[..., 0] < 640)
+                 & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
                 v_vis_min + torch.rand_like(pts) * v_vis_max,
                 torch.full_like(pts, v_inv)
             )
@@ -57,11 +59,13 @@ def simulate_kalman_filter(
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
         # Save post-update prediction.
-        pred1[..., t], covs1[..., t] = means[..., :K*D], covs[..., :K*D, :K*D]
+        pred1.append(means[..., :K*D])
+        covs1.append(covs[..., :K*D, :K*D])
         # Predict next state. (Only if not the last state.)
         if t != T - 1:
             means, covs = model.predict_train(dt, means, covs)
-    return pred0, covs0, pred1, covs1
+    return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
+        torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
 
 def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
@@ -88,7 +92,7 @@ def train_epoch(model, loader, raw_data, optimizer, w_mse: float) -> float:
     model.train()
     total_loss = 0
     count = 0
-    cams = raw_data.get_some_cams()
+    cams = [cam.to(model.device) for cam in raw_data.get_some_cams()]
     for fps, track in loader:
         fps = fps.to(model.device, non_blocking=True)
         track = track.to(model.device, non_blocking=True)
@@ -113,7 +117,7 @@ def eval_epoch(model, loader, raw_data, w_mse: float) -> float:
     model.eval()
     total_loss = 0
     count = 0
-    cams = raw_data.get_some_cams()
+    cams = [cam.to(model.device) for cam in raw_data.get_some_cams()]
     # Disable gradients to save memory and compute.
     with torch.inference_mode():
         for fps, track in loader:
