@@ -11,10 +11,70 @@ import kalman
 from camera import Camera
 from util import NetStorage
 
+def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix") -> dict:
+    """
+    Analyzes a large covariance matrix for symmetry, positive-definiteness, 
+    conditioning, and extreme variance disparities.
+    """
+    results = {}
+    print(f"\n================ {name} ({cov.shape}) ================")
+
+    # 1. Symmetry Check
+    asym_err = torch.max(torch.abs(cov - cov.mT)).item()
+    results['max_asymmetry'] = asym_err
+    print(f"Max Asymmetry Error | P - P^T | : {asym_err:.2e}")
+    if asym_err > 1e-4:
+        print("  ⚠️ WARNING: Matrix has lost symmetry.")
+
+    # 2. NaN / Inf Check
+    has_nan = torch.isnan(cov).any().item()
+    has_inf = torch.isinf(cov).any().item()
+    if has_nan or has_inf:
+        print(f"  ❌ CRITICAL: Matrix contains NaN ({has_nan}) or Inf ({has_inf})")
+        return results
+
+    # 3. Eigenvalue Spectrum & Positive-Definiteness
+    # eigh is optimized for symmetric matrices
+    sym_cov = 0.5 * (cov + cov.mT)
+    eigenvalues = torch.linalg.eigvalsh(sym_cov)
+    
+    min_eig = eigenvalues.min().item()
+    max_eig = eigenvalues.max().item()
+    num_neg = (eigenvalues < 0).sum().item()
+    
+    results['min_eig'] = min_eig
+    results['max_eig'] = max_eig
+    results['num_neg_eigs'] = num_neg
+
+    print(f"Min Eigenvalue            : {min_eig:.2e}")
+    print(f"Max Eigenvalue            : {max_eig:.2e}")
+    print(f"Negative Eigenvalue Count : {num_neg} / {cov.shape[-1]}")
+
+    # 4. Condition Number (Dynamic Range Ratio)
+    if min_eig > 0:
+        cond_num = max_eig / min_eig
+        results['condition_number'] = cond_num
+        print(f"Condition Number (λmax/λmin) : {cond_num:.2e}")
+        if cond_num > 1e10:
+            print("  ⚠️ WARNING: Matrix is severely ill-conditioned (loss of precision likely).")
+    else:
+        print("  ❌ CRITICAL: Matrix is NOT Positive-Definite!")
+
+    # 5. Diagonal Variance Analysis
+    diag = torch.diagonal(cov, dim1=-2, dim2=-1)
+    neg_diag_indices = (diag <= 0).nonzero(as_tuple=True)[0].tolist()
+    
+    if neg_diag_indices:
+        print(f"  ❌ State indices with non-positive variance: {neg_diag_indices}")
+    
+    # Range of variances across the 175 states
+    print(f"Variance Range (Min/Max Diag): {diag.min().item():.2e} / {diag.max().item():.2e}")
+    
+    return results
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_init=20.0, v_vis_min=5.0, v_vis_max=50.0, v_inv=1000
+    cams: list[Camera], v_init=20.0, v_vis_min=5.0, v_vis_max=50.0, v_inv=1000.0
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
@@ -31,7 +91,8 @@ def simulate_kalman_filter(
         model.init_mean[K*D:].expand(*Bs, -1)
     ], dim=-1)
     covs = model.init_cov.expand(*Bs, *model.init_cov.shape)
-    for t, gt in enumerate(track):
+    for t in range(T):
+        gt = track[..., t, :, :].contiguous()
         # Save pre-update prediction.
         pred0.append(means[..., :K*D])
         covs0.append(covs[..., :K*D, :K*D])
@@ -48,21 +109,52 @@ def simulate_kalman_filter(
         ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:K*D].view(-1, D)).flatten()
                  for cam in cams]
         ob_ms = [
-            cam.undistort_points(pts + torch.randn_like(pts) * cov)
+            cam.undistort_points(
+                (pts + torch.randn_like(pts) * cov).view(*Bs, -1))
             for cam, pts, cov in zip(cams, proj, ncov)]
         ob_vs = [
-            cam.undistort_covars(torch.diag(cov))
+            cam.undistort_covars(torch.diag_embed(cov.view(*Bs, -1)))
             for cam, cov in zip(cams, ncov)]
         ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
-        ob_ms.append(model.constr_val)
-        ob_vs.append(model.constr_cov)
+        ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
+        ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
+        for cov in ob_v.view(-1, *ob_v.shape[-2:]):
+            try:
+                torch.linalg.cholesky(cov)
+            except:
+                print("! ob_v")
+                diagnose_covariance(cov)
+                return
+        for cov in covs.view(-1, *covs.shape[-2:]):
+            try:
+                torch.linalg.cholesky(cov)
+            except:
+                print("! covs")
+                diagnose_covariance(cov)
+                return
+        print("update")
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
+        covs = (covs + covs.mT) / 2
         # Save post-update prediction.
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
         # Predict next state. (Only if not the last state.)
         if t != T - 1:
+            try:
+                torch.linalg.cholesky(model.dyn_cov)
+            except:
+                print("! dyn_cov")
+                diagnose_covariance(model.dyn_cov)
+                return
+            for cov in covs.view(-1, *covs.shape[-2:]):
+                try:
+                    torch.linalg.cholesky(cov)
+                except:
+                    print("! covs")
+                    diagnose_covariance(cov)
+                    return
+            print("predict")
             means, covs = model.predict_train(dt, means, covs)
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
@@ -78,6 +170,12 @@ def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
     *Bs, T, K, D = gt.shape
     gt_flat = gt.view(*Bs, T, K * D)
     mse_loss = nn.functional.mse_loss(pred, gt_flat)
+    for cov in covs.view(-1, K*D, K*D):
+        try:
+            torch.linalg.cholesky(cov)
+        except:
+            print(cov.tolist())
+            break
     dist = torch.distributions.MultivariateNormal(pred, covs)
     nll_loss = -dist.log_prob(gt_flat).mean()
     return nll_loss + w_mse * mse_loss
@@ -106,6 +204,7 @@ def train_epoch(model, loader, raw_data, optimizer, w_mse: float) -> float:
         optimizer.step()
         total_loss += loss.item()
         count += 1
+        print("iter")
     return total_loss / count
 
 
