@@ -325,6 +325,10 @@ def update_res(
     Apply an update when explicitly given the observation residual. This method
     can be reused both for linear and Extended Kalman filtering.
     """
+    print("min eigv obs_cov", torch.linalg.eigvalsh(obs_cov).min())
+    print("max abs obs_mat", torch.max(torch.abs(obs_mat)))
+    # Clamp the Jacobian for better stability.
+    obs_mat = torch.clamp(obs_mat, min=-1e2, max=1e2)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
     gain = cov @ torch.linalg.solve(inov.mT, obs_mat).mT
     *_, N, N = cov.shape

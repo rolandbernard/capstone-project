@@ -11,6 +11,7 @@ import kalman
 from camera import Camera
 from util import NetStorage
 
+
 def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix") -> dict:
     """
     Analyzes a large covariance matrix for symmetry, positive-definiteness, 
@@ -30,18 +31,19 @@ def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix") -> d
     has_nan = torch.isnan(cov).any().item()
     has_inf = torch.isinf(cov).any().item()
     if has_nan or has_inf:
-        print(f"  ❌ CRITICAL: Matrix contains NaN ({has_nan}) or Inf ({has_inf})")
+        print(
+            f"  ❌ CRITICAL: Matrix contains NaN ({has_nan}) or Inf ({has_inf})")
         return results
 
     # 3. Eigenvalue Spectrum & Positive-Definiteness
     # eigh is optimized for symmetric matrices
     sym_cov = 0.5 * (cov + cov.mT)
     eigenvalues = torch.linalg.eigvalsh(sym_cov)
-    
+
     min_eig = eigenvalues.min().item()
     max_eig = eigenvalues.max().item()
     num_neg = (eigenvalues < 0).sum().item()
-    
+
     results['min_eig'] = min_eig
     results['max_eig'] = max_eig
     results['num_neg_eigs'] = num_neg
@@ -56,21 +58,25 @@ def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix") -> d
         results['condition_number'] = cond_num
         print(f"Condition Number (λmax/λmin) : {cond_num:.2e}")
         if cond_num > 1e10:
-            print("  ⚠️ WARNING: Matrix is severely ill-conditioned (loss of precision likely).")
+            print(
+                "  ⚠️ WARNING: Matrix is severely ill-conditioned (loss of precision likely).")
     else:
         print("  ❌ CRITICAL: Matrix is NOT Positive-Definite!")
 
     # 5. Diagonal Variance Analysis
     diag = torch.diagonal(cov, dim1=-2, dim2=-1)
     neg_diag_indices = (diag <= 0).nonzero(as_tuple=True)[0].tolist()
-    
+
     if neg_diag_indices:
-        print(f"  ❌ State indices with non-positive variance: {neg_diag_indices}")
-    
+        print(
+            f"  ❌ State indices with non-positive variance: {neg_diag_indices}")
+
     # Range of variances across the 175 states
-    print(f"Variance Range (Min/Max Diag): {diag.min().item():.2e} / {diag.max().item():.2e}")
-    
+    print(
+        f"Variance Range (Min/Max Diag): {diag.min().item():.2e} / {diag.max().item():.2e}")
+
     return results
+
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
@@ -108,9 +114,12 @@ def simulate_kalman_filter(
             for pts in proj]
         ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:K*D].view(-1, D)).flatten()
                  for cam in cams]
+        min_bounds = torch.tensor([0.0, 0.0], device=means.device)
+        max_bounds = torch.tensor([640.0, 480.0], device=means.device)
         ob_ms = [
             cam.undistort_points(
-                (pts + torch.randn_like(pts) * cov).view(*Bs, -1))
+                (pts + torch.randn_like(pts) * cov)
+                .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
             for cam, pts, cov in zip(cams, proj, ncov)]
         ob_vs = [
             cam.undistort_covars(torch.diag_embed(cov.view(*Bs, -1)))
@@ -119,13 +128,8 @@ def simulate_kalman_filter(
         ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
         ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
-        for cov in ob_v.view(-1, *ob_v.shape[-2:]):
-            try:
-                torch.linalg.cholesky(cov)
-            except:
-                print("! ob_v")
-                diagnose_covariance(cov)
-                return
+        print("update")
+        means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
         for cov in covs.view(-1, *covs.shape[-2:]):
             try:
                 torch.linalg.cholesky(cov)
@@ -133,20 +137,13 @@ def simulate_kalman_filter(
                 print("! covs")
                 diagnose_covariance(cov)
                 return
-        print("update")
-        means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
-        covs = (covs + covs.mT) / 2
         # Save post-update prediction.
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
         # Predict next state. (Only if not the last state.)
         if t != T - 1:
-            try:
-                torch.linalg.cholesky(model.dyn_cov)
-            except:
-                print("! dyn_cov")
-                diagnose_covariance(model.dyn_cov)
-                return
+            print("predict")
+            means, covs = model.predict_train(dt, means, covs)
             for cov in covs.view(-1, *covs.shape[-2:]):
                 try:
                     torch.linalg.cholesky(cov)
@@ -154,8 +151,6 @@ def simulate_kalman_filter(
                     print("! covs")
                     diagnose_covariance(cov)
                     return
-            print("predict")
-            means, covs = model.predict_train(dt, means, covs)
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
@@ -170,12 +165,6 @@ def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
     *Bs, T, K, D = gt.shape
     gt_flat = gt.view(*Bs, T, K * D)
     mse_loss = nn.functional.mse_loss(pred, gt_flat)
-    for cov in covs.view(-1, K*D, K*D):
-        try:
-            torch.linalg.cholesky(cov)
-        except:
-            print(cov.tolist())
-            break
     dist = torch.distributions.MultivariateNormal(pred, covs)
     nll_loss = -dist.log_prob(gt_flat).mean()
     return nll_loss + w_mse * mse_loss
@@ -281,10 +270,10 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
         val = dataset.KalmanDataset(
             f"{os.path.dirname(__file__)}/data/kalman/val")
     train_loader = DataLoader(
-        train, 32, shuffle=True, drop_last=True, num_workers=8,
+        train, 1, shuffle=not testing, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     val_loader = DataLoader(
-        val, 32, shuffle=True, drop_last=True, num_workers=8,
+        val, 1, shuffle=not testing, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader,
                  raw_data, num_epochs, w_mse, callback)
