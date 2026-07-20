@@ -5,6 +5,8 @@ from typing import Callable
 import torch
 import torch.nn as nn
 
+import util
+
 
 class LinearPhysics:
     """
@@ -173,6 +175,17 @@ class LearnedPhysics(nn.Module, WalledPhysics):
     def device(self):
         return next(self.parameters()).device
 
+    def sanitize_covariances(self, floor: float = 1e-6):
+        """
+        For all covariances in this model, force their symmetry and project back
+        onto the positive-definite cone. This guarantees that they remain valid.
+        """
+        with torch.no_grad():
+            self.dyn_cov.copy_(util.sanitize_covariance(self.dyn_cov, floor))
+            self.init_cov.copy_(util.sanitize_covariance(self.init_cov, floor))
+            self.constr_cov.copy_(
+                util.sanitize_covariance(self.constr_cov, floor))
+
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
         """ Convert a static constraints index array to a matrix. """
         mat = torch.zeros(
@@ -325,8 +338,6 @@ def update_res(
     Apply an update when explicitly given the observation residual. This method
     can be reused both for linear and Extended Kalman filtering.
     """
-    print("min eigv obs_cov", torch.linalg.eigvalsh(obs_cov).min())
-    print("max abs obs_mat", torch.max(torch.abs(obs_mat)))
     # Clamp the Jacobian for better stability.
     obs_mat = torch.clamp(obs_mat, min=-1e2, max=1e2)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov

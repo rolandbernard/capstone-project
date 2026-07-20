@@ -272,3 +272,11 @@ def evaluate_from_files(gt_file: str, pred_file: str, dist_threshold=15.0):
     _, gt_frames, _, _, _ = load_tracks(gt_file)
     _, pred_frames, _, _, _ = load_tracks(pred_file)
     return evaluate_mot_metrics(gt_frames, pred_frames, dist_threshold)
+
+
+def sanitize_covariance(cov: torch.Tensor, floor: float = 1e-6) -> torch.Tensor:
+    """ Forces symmetry and projects back onto the positive-definite cone. """
+    sym_cov = 0.5 * (cov + cov.mT)
+    eigs, vecs = torch.linalg.eigh(sym_cov)
+    eigs = torch.clamp(eigs, min=floor)
+    return vecs @ torch.diag_embed(eigs) @ vecs.mT

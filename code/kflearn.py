@@ -128,8 +128,8 @@ def simulate_kalman_filter(
         ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
         ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
-        print("update")
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
+        print("update")
         for cov in covs.view(-1, *covs.shape[-2:]):
             try:
                 torch.linalg.cholesky(cov)
@@ -142,8 +142,8 @@ def simulate_kalman_filter(
         covs1.append(covs[..., :K*D, :K*D])
         # Predict next state. (Only if not the last state.)
         if t != T - 1:
-            print("predict")
             means, covs = model.predict_train(dt, means, covs)
+            print("predict")
             for cov in covs.view(-1, *covs.shape[-2:]):
                 try:
                     torch.linalg.cholesky(cov)
@@ -170,7 +170,7 @@ def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
     return nll_loss + w_mse * mse_loss
 
 
-def train_epoch(model, loader, raw_data, optimizer, w_mse: float) -> float:
+def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer, w_mse: float) -> float:
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -189,11 +189,12 @@ def train_epoch(model, loader, raw_data, optimizer, w_mse: float) -> float:
         loss = compute_loss(pred0, covs0, track, w_mse) \
             + compute_loss(pred1, covs1, track, w_mse)
         loss.backward()
-        nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
+        nn.utils.clip_grad_value_(model.train_parameters(), clip_value=1.0)
         optimizer.step()
         total_loss += loss.item()
         count += 1
         print("iter")
+        model.sanitize_covariances()
     return total_loss / count
 
 
