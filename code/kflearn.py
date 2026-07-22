@@ -12,75 +12,9 @@ from camera import Camera
 from util import NetStorage
 
 
-def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix") -> dict:
-    """
-    Analyzes a large covariance matrix for symmetry, positive-definiteness, 
-    conditioning, and extreme variance disparities.
-    """
-    results = {}
-    print(f"\n================ {name} ({cov.shape}) ================")
-
-    # 1. Symmetry Check
-    asym_err = torch.max(torch.abs(cov - cov.mT)).item()
-    results['max_asymmetry'] = asym_err
-    print(f"Max Asymmetry Error | P - P^T | : {asym_err:.2e}")
-    if asym_err > 1e-4:
-        print("  ⚠️ WARNING: Matrix has lost symmetry.")
-
-    # 2. NaN / Inf Check
-    has_nan = torch.isnan(cov).any().item()
-    has_inf = torch.isinf(cov).any().item()
-    if has_nan or has_inf:
-        print(
-            f"  ❌ CRITICAL: Matrix contains NaN ({has_nan}) or Inf ({has_inf})")
-        return results
-
-    # 3. Eigenvalue Spectrum & Positive-Definiteness
-    # eigh is optimized for symmetric matrices
-    sym_cov = 0.5 * (cov + cov.mT)
-    eigenvalues = torch.linalg.eigvalsh(sym_cov)
-
-    min_eig = eigenvalues.min().item()
-    max_eig = eigenvalues.max().item()
-    num_neg = (eigenvalues < 0).sum().item()
-
-    results['min_eig'] = min_eig
-    results['max_eig'] = max_eig
-    results['num_neg_eigs'] = num_neg
-
-    print(f"Min Eigenvalue            : {min_eig:.2e}")
-    print(f"Max Eigenvalue            : {max_eig:.2e}")
-    print(f"Negative Eigenvalue Count : {num_neg} / {cov.shape[-1]}")
-
-    # 4. Condition Number (Dynamic Range Ratio)
-    if min_eig > 0:
-        cond_num = max_eig / min_eig
-        results['condition_number'] = cond_num
-        print(f"Condition Number (λmax/λmin) : {cond_num:.2e}")
-        if cond_num > 1e10:
-            print(
-                "  ⚠️ WARNING: Matrix is severely ill-conditioned (loss of precision likely).")
-    else:
-        print("  ❌ CRITICAL: Matrix is NOT Positive-Definite!")
-
-    # 5. Diagonal Variance Analysis
-    diag = torch.diagonal(cov, dim1=-2, dim2=-1)
-    neg_diag_indices = (diag <= 0).nonzero(as_tuple=True)[0].tolist()
-
-    if neg_diag_indices:
-        print(
-            f"  ❌ State indices with non-positive variance: {neg_diag_indices}")
-
-    # Range of variances across the 175 states
-    print(
-        f"Variance Range (Min/Max Diag): {diag.min().item():.2e} / {diag.max().item():.2e}")
-
-    return results
-
-
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_init=20.0, v_vis_min=5.0, v_vis_max=50.0, v_inv=1000.0
+    cams: list[Camera], v_init=20.0, v_vis_min=5.0, v_vis_max=75.0, v_inv=1e5
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
@@ -108,7 +42,7 @@ def simulate_kalman_filter(
             torch.where(
                 ((pts[..., 0] > 0) & (pts[..., 0] < 640)
                  & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
-                v_vis_min + torch.rand_like(pts) * v_vis_max,
+                v_vis_min + torch.rand_like(pts) * (v_vis_max - v_vis_min),
                 torch.full_like(pts, v_inv)
             )
             for pts in proj]
@@ -118,7 +52,7 @@ def simulate_kalman_filter(
         max_bounds = torch.tensor([640.0, 480.0], device=means.device)
         ob_ms = [
             cam.undistort_points(
-                (pts + torch.randn_like(pts) * cov)
+                (pts + torch.randn_like(pts) * (cov.clamp(max=v_vis_max)))
                 .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
             for cam, pts, cov in zip(cams, proj, ncov)]
         ob_vs = [
@@ -130,13 +64,8 @@ def simulate_kalman_filter(
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
         print("update")
-        for cov in covs.view(-1, *covs.shape[-2:]):
-            try:
-                torch.linalg.cholesky(cov)
-            except:
-                print("! covs")
-                diagnose_covariance(cov)
-                return
+        for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
+            util.check_covariance(cov)
         # Save post-update prediction.
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
@@ -145,12 +74,7 @@ def simulate_kalman_filter(
             means, covs = model.predict_train(dt, means, covs)
             print("predict")
             for cov in covs.view(-1, *covs.shape[-2:]):
-                try:
-                    torch.linalg.cholesky(cov)
-                except:
-                    print("! covs")
-                    diagnose_covariance(cov)
-                    return
+                util.check_covariance(cov)
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
@@ -193,7 +117,7 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer, w_mse
         optimizer.step()
         total_loss += loss.item()
         count += 1
-        print("iter")
+        print("==== iter ====")
         model.sanitize_covariances()
     return total_loss / count
 
@@ -271,10 +195,10 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
         val = dataset.KalmanDataset(
             f"{os.path.dirname(__file__)}/data/kalman/val")
     train_loader = DataLoader(
-        train, 1, shuffle=not testing, drop_last=True, num_workers=8,
+        train, 32, shuffle=not testing, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     val_loader = DataLoader(
-        val, 1, shuffle=not testing, drop_last=True, num_workers=8,
+        val, 32, shuffle=not testing, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader,
                  raw_data, num_epochs, w_mse, callback)

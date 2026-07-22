@@ -4,7 +4,6 @@ import copy
 
 import torch
 import scipy.optimize
-from torch import Tensor
 
 import util
 import camera
@@ -35,6 +34,8 @@ class Track:
         """ Update the track to the new state (from a prediction). """
         self.mean = mean
         self.cov = cov
+        # Uncomment this as an extra assertion when debugging.
+        # util.check_covariance(cov)
 
     def update(self, mean: torch.Tensor, cov: torch.Tensor):
         """ Update the track to the new state (from a detection). """

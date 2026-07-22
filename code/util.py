@@ -280,3 +280,60 @@ def sanitize_covariance(cov: torch.Tensor, floor: float = 1e-6) -> torch.Tensor:
     eigs, vecs = torch.linalg.eigh(sym_cov)
     eigs = torch.clamp(eigs, min=floor)
     return vecs @ torch.diag_embed(eigs) @ vecs.mT
+
+
+def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix"):
+    """
+    Analyzes a large covariance matrix for symmetry, positive-definiteness, 
+    conditioning, and extreme variance disparities.
+    """
+    results = {}
+    print(f"\n================ {name} ({cov.shape}) ================")
+    sym_err = torch.max(torch.abs(cov - cov.mT)).item()
+    results['max_asymmetry'] = sym_err
+    print(f"Max Asymmetry Error | P - P^T | : {sym_err:.2e}")
+    if sym_err > 1:
+        print("  CRITICAL: Matrix has lost symmetry")
+    elif sym_err > 1e-3:
+        print("  WARNING: Matrix has lost symmetry")
+    has_nan = torch.isnan(cov).any().item()
+    has_inf = torch.isinf(cov).any().item()
+    if has_nan or has_inf:
+        print(
+            f"  CRITICAL: Matrix contains NaN ({has_nan}) or Inf ({has_inf})")
+    else:
+        sym_cov = 0.5 * (cov + cov.mT)
+        eigenvalues = torch.linalg.eigvalsh(sym_cov)
+        min_eig = eigenvalues.min().item()
+        max_eig = eigenvalues.max().item()
+        num_neg = (eigenvalues < 0).sum().item()
+        results['min_eig'] = min_eig
+        results['max_eig'] = max_eig
+        results['num_neg_eigs'] = num_neg
+        print(f"Min Eigenvalue            : {min_eig:.2e}")
+        print(f"Max Eigenvalue            : {max_eig:.2e}")
+        print(f"Negative Eigenvalue Count : {num_neg} / {cov.shape[-1]}")
+        if min_eig > 0:
+            cond_num = max_eig / min_eig
+            results['condition_number'] = cond_num
+            print(f"Condition Number (λmax/λmin) : {cond_num:.2e}")
+            if cond_num > 1e10:
+                print("  WARNING: Matrix is severely ill-conditioned")
+        else:
+            print("  CRITICAL: Matrix is NOT Positive-Definite")
+        diag = torch.diagonal(cov, dim1=-2, dim2=-1)
+        neg_diag_indices = (diag <= 0).nonzero(as_tuple=True)[0].tolist()
+        if neg_diag_indices:
+            print(
+                f"  State indices with non-positive variance: {neg_diag_indices}")
+        print(
+            f"Variance Range (Min/Max Diag): {diag.min().item():.2e} / {diag.max().item():.2e}")
+
+
+def check_covariance(cov: torch.Tensor):
+    """ Check that the given covariance matrix is SPD and fail otherwise. """
+    try:
+        torch.linalg.cholesky(cov)
+    except:
+        diagnose_covariance(cov)
+        torch.linalg.cholesky(cov)

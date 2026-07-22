@@ -102,7 +102,7 @@ class CmuPanopticDataset:
 
     endpoint: str = "http://domedb.perception.cs.cmu.edu/webdata/dataset"
     hd_fps = 29.97
-    vga_fps = 25
+    vga_fps = 25.0
     coco17_indices = [1, 15, 17, 16, 18, 3, 9, 4,
                       10, 5, 11, 6, 12, 7, 13, 8, 14]
     scenes: list[str] = [
