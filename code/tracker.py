@@ -43,8 +43,12 @@ class Track:
         self.last_detection = 0
         self.num_detection += 1
 
-    def no_update(self):
+    def no_update(self, mean: torch.Tensor | None = None, cov: torch.Tensor | None = None):
         """ Record that there was no update for this track for one update cycle. """
+        if mean is not None and cov is not None:
+            # There might still be an update even if we don't have any observations
+            # in case we are using additional constraints.
+            self.moved(mean, cov)
         self.last_detection += 1
 
     def get_keypoints(self) -> torch.Tensor:
@@ -278,7 +282,10 @@ class Tracker:
             ob_vs.append(self.physics.constr_cov)
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         mean, cov = kalman.eupdate(track.mean, track.cov, ob_m, ob_v, ob_f)
-        track.update(mean, cov)
+        if len(cams) != 0:
+            track.update(mean, cov)
+        else:
+            track.no_update(mean, cov)
 
     def update(self, cams: list[Camera], imgs: list[torch.Tensor]):
         """
@@ -312,8 +319,12 @@ class Tracker:
                 self.update_track(track, ob_cams, ob_kpts, ob_covs)
                 new_tracks.append(track)
             else:
+                # Update the track if we have constraints, otherwise do nothing.
+                if isinstance(self.physics, ConstrainedPhysics):
+                    self.update_track(track, [], [], [])
+                else:
+                    track.no_update()
                 # Check if we want to delete the track.
-                track.no_update()
                 if track.num_detection >= self.min_age and track.last_detection <= self.max_inv:
                     new_tracks.append(track)
         self.add_time_stat("update", t_start)
