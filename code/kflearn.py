@@ -14,7 +14,7 @@ from util import NetStorage
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_init=20.0, v_vis_min=5.0, v_vis_max=75.0, v_inv=1e5
+    cams: list[Camera], v_init=0.0, v_vis_min=4.0, v_vis_max=50.0, v_inv=1e3
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
@@ -38,7 +38,7 @@ def simulate_kalman_filter(
         covs0.append(covs[..., :K*D, :K*D])
         # Generate fake observations and perform update.
         proj = [cam.project(gt) for cam in cams]
-        ncov = [
+        nstd = [
             torch.where(
                 ((pts[..., 0] > 0) & (pts[..., 0] < 640)
                  & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
@@ -52,12 +52,12 @@ def simulate_kalman_filter(
         max_bounds = torch.tensor([640.0, 480.0], device=means.device)
         ob_ms = [
             cam.undistort_points(
-                (pts + torch.randn_like(pts) * (cov.clamp(max=v_vis_max)))
+                (pts + torch.randn_like(pts) * std.clamp(max=v_vis_max))
                 .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
-            for cam, pts, cov in zip(cams, proj, ncov)]
+            for cam, pts, std in zip(cams, proj, nstd)]
         ob_vs = [
-            cam.undistort_covars(torch.diag_embed(cov.view(*Bs, -1)))
-            for cam, cov in zip(cams, ncov)]
+            cam.undistort_covars(torch.diag_embed((std * std).view(*Bs, -1)))
+            for cam, std in zip(cams, nstd)]
         ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
         ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
         ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
@@ -65,7 +65,9 @@ def simulate_kalman_filter(
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
         print("update")
         for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
+            print(i, end=" ")
             util.check_covariance(cov)
+        print()
         # Save post-update prediction.
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
@@ -73,8 +75,10 @@ def simulate_kalman_filter(
         if t != T - 1:
             means, covs = model.predict_train(dt, means, covs)
             print("predict")
-            for cov in covs.view(-1, *covs.shape[-2:]):
+            for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
+                print(i, end=" ")
                 util.check_covariance(cov)
+            print()
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
