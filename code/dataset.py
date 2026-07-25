@@ -474,7 +474,7 @@ class KalmanDataset(Dataset):
             fps = CmuPanopticDataset.hd_fps if kind == "hd" else CmuPanopticDataset.vga_fps
             for down in downsample:
                 for start in range(0, (length // down) - seq_len + 1, stride):
-                    self.samples.append((file, fps, down, start))
+                    self.samples.append((file, fps / down, down, start))
 
     def __len__(self):
         return len(self.samples)
