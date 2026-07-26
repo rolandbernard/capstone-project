@@ -14,7 +14,7 @@ from util import NetStorage
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_init=0.0, v_vis_min=4.0, v_vis_max=50.0, v_inv=1e3
+    cams: list[Camera], v_vis_min=4.0, v_vis_max=50.0, v_inv=1e3, checks=False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
@@ -26,8 +26,7 @@ def simulate_kalman_filter(
     *Bs, T, K, D = track.shape
     pred0, covs0, pred1, covs1 = [], [], [], []
     means = torch.concat([
-        track[..., 0, :, :].view(*Bs, -1)
-        + torch.randn(*Bs, K*D, device=track.device) * v_init,
+        track[..., 0, :, :].view(*Bs, -1),
         model.init_mean[K*D:].expand(*Bs, -1)
     ], dim=-1)
     covs = model.init_cov.expand(*Bs, *model.init_cov.shape)
@@ -63,22 +62,24 @@ def simulate_kalman_filter(
         ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
-        print("update")
-        for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
-            print(i, end=" ")
-            util.check_covariance(cov)
-        print()
+        if checks:
+            print("update")
+            for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
+                print(i, end=" ")
+                util.check_covariance(cov)
+            print()
         # Save post-update prediction.
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
         # Predict next state. (Only if not the last state.)
         if t != T - 1:
             means, covs = model.predict_train(dt, means, covs)
-            print("predict")
-            for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
-                print(i, end=" ")
-                util.check_covariance(cov)
-            print()
+            if checks:
+                print("predict")
+                for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
+                    print(i, end=" ")
+                    util.check_covariance(cov)
+                print()
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
