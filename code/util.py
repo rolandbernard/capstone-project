@@ -330,10 +330,12 @@ def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix"):
             f"Variance Range (Min/Max Diag): {diag.min().item():.2e} / {diag.max().item():.2e}")
 
 
-def check_covariance(cov: torch.Tensor):
+def check_covariance(cov: torch.Tensor, label: str | None = None):
     """ Check that the given covariance matrix is SPD and fail otherwise. """
     try:
         torch.linalg.cholesky(cov)
     except:
+        if label is not None:
+            print(label)
         diagnose_covariance(cov)
         torch.linalg.cholesky(cov)

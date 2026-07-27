@@ -261,7 +261,6 @@ def multi_discretize(dt: torch.Tensor, dyn_mat: torch.Tensor, dyn_cov: torch.Ten
     This differs from `discretize` in that it computes one matrix per value in
     `dt`, keeping the leading batch dimensions.
     """
-    # Use a second order approximation for now.
     N, N = dyn_mat.shape
     dt = dt.unsqueeze(-1).unsqueeze(-1)
     dyn_mat = torch.eye(N, device=dyn_mat.device) + dyn_mat * dt \
