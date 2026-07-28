@@ -14,7 +14,7 @@ from util import NetStorage
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_vis_min=4.0, v_vis_max=50.0, v_inv=1e5, checks=False
+    cams: list[Camera], v_vis_min=10.0, v_vis_max=10.0, v_inv=1e5, checks=False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations

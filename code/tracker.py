@@ -488,7 +488,7 @@ def build_physics(scale=100.0) -> LinearPhysics:
         torch.concat([torch.zeros(nk, nk), torch.eye(nk)*-0.2], dim=1)
     ], dim=0)
     dyn_cov = torch.diag(torch.concat([
-        torch.full((nk,), (0.05 * scale)**2),
+        torch.full((nk,), (0.01 * scale)**2),
         torch.full((nk,), (3.0 * scale)**2),
     ]))
     init_mean = torch.zeros(nk + nk)
