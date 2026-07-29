@@ -146,15 +146,15 @@ class WalledPhysics(ConstrainedPhysics):
         return self
 
 
-class LearnedPhysics(nn.Module, WalledPhysics):
+class LearnedPhysics(nn.Module, ConstrainedPhysics):
     """
     A physics model where parameters are designed to be explicitly learned by
     means of gradient based optimization. The basic operations are the same as
-    that of the walled physics and this module can be initialized with an
-    instance `WalledPhysics`.
+    that of the constrained physics and this module can be initialized with an
+    instance `ConstrainedPhysics`.
     """
 
-    def __init__(self, init: WalledPhysics):
+    def __init__(self, init: ConstrainedPhysics):
         nn.Module.__init__(self)
         self.get_dyn = lru_cache()(self._get_dyn)
         self.num_keypoint = init.num_keypoint
@@ -166,10 +166,6 @@ class LearnedPhysics(nn.Module, WalledPhysics):
             self.constraints_to_matrix(init.constraints, init.point_mix))
         self.constr_cov = self.as_parameter(init.constr_cov)
         self.constr_val = self.as_parameter(init.constr_val)
-        self.wall_centers = nn.Parameter(
-            init.wall_centers, requires_grad=False)
-        self.wall_norm = nn.Parameter(init.wall_norm, requires_grad=False)
-        self.feet_mat = self.as_parameter(self.feet_to_matrix(init.feet_idx))
 
     @property
     def device(self):
@@ -201,15 +197,6 @@ class LearnedPhysics(nn.Module, WalledPhysics):
             mat[3, i, c] = 1
         return mat
 
-    def feet_to_matrix(self, feet: torch.Tensor) -> torch.Tensor:
-        """ Convert a static feet index array to a matrix. """
-        mat = torch.zeros(
-            (feet.shape[1], self.num_keypoint * self.wall_norm.shape[0]),
-            device=feet.device)
-        for i, (a, b) in enumerate(feet.T):
-            mat[i, self.num_keypoint*b + a] = 1
-        return mat
-
     def as_parameter(self, x: torch.Tensor) -> nn.Parameter:
         """ Wrap a tensor in a PyTorch parameter node. """
         x.requires_grad = True
@@ -221,25 +208,12 @@ class LearnedPhysics(nn.Module, WalledPhysics):
         return torch.linalg.vector_norm(
             (self.constraints[0:3] @ x.view(*Bs, 1, -1, 1)).view(*Bs, 3, -1), dim=-2)
 
-    def skeleton_constraints(self, x: torch.Tensor) -> torch.Tensor:
-        """ Compute the constraint violation for the skeleton constrains. """
+    def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
+        """ Compute the constraint violation. """
         *Bs, _ = x.shape
         values = (self.constraints @ x.view(*Bs, 1, -1, 1)).view(*Bs, 4, -1)
         dist = torch.linalg.vector_norm(values[..., 0:3, :], dim=-2)
         return dist - values[..., 3, :]
-
-    def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
-        """ Compute the constraint violation. """
-        *Bs, _ = x.shape
-        points = x[:self.num_keypoint*3].view(*Bs, -1, 3)
-        w_dist = ((points.view(*Bs, -1, 1, 3) - self.wall_centers.view(*Bs, 1, -1, 3))
-                  .view(*Bs, -1, 1, 1, 3) @ self.wall_norm.view(*Bs, 1, -1, 3, 1)) \
-            .view(*Bs, -1)
-        return torch.concat([
-            self.skeleton_constraints(x),
-            torch.nn.functional.relu(-w_dist),
-            (self.feet_mat @ w_dist.unsqueeze(-1)).squeeze(-1),
-        ], dim=-1)
 
     def predict_train(self, dt: torch.Tensor, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
