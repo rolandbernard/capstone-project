@@ -14,7 +14,7 @@ from util import NetStorage
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_vis_min=10.0, v_vis_max=10.0, v_inv=1e5, checks=False
+    cams: list[Camera], v_vis_min=2.0, v_vis_max=25.0, v_inv=1e5, checks=False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
@@ -25,10 +25,7 @@ def simulate_kalman_filter(
     dt = 1.0 / fps
     *Bs, T, K, D = track.shape
     pred0, covs0, pred1, covs1 = [], [], [], []
-    means = torch.concat([
-        track[..., 0, :, :].view(*Bs, -1),
-        model.init_mean[K*D:].expand(*Bs, -1)
-    ], dim=-1)
+    means = model.init_mean.expand(*Bs, *model.init_mean.shape)
     covs = model.init_cov.expand(*Bs, *model.init_cov.shape)
     for t in range(T):
         gt = track[..., t, :, :].contiguous()
@@ -57,9 +54,9 @@ def simulate_kalman_filter(
         ob_vs = [
             cam.undistort_covars(torch.diag_embed((std * std).view(*Bs, -1)))
             for cam, std in zip(cams, nstd)]
-        # ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
-        # ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
-        # ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
+        ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
+        ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
+        ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
         if checks:

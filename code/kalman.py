@@ -222,6 +222,9 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         different time step per batch.
         """
         dyn_mat, dyn_cov = multi_discretize(dt, self.dyn_mat, self.dyn_cov)
+        torch.set_printoptions(threshold=float('inf'), precision=2)
+        print(dyn_mat)
+        print(dyn_cov.diag())
         return predict(mean, cov, dyn_mat, dyn_cov)
 
     def train_parameters(self):
