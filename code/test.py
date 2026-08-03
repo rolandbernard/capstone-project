@@ -40,21 +40,31 @@ def simulate_kalman_filter(
             torch.where(
                 ((pts[..., 0] > 0) & (pts[..., 0] < 640)
                  & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
-                v_vis_min + torch.rand_like(pts) * (v_vis_max - v_vis_min),
-                torch.full_like(pts, v_inv)
+                v_vis_min + torch.rand_like(gt) * (v_vis_max - v_vis_min),
+                torch.full_like(gt, v_inv)
             )
             for pts in proj]
-        ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:K*D].view(-1, D)).flatten()
+        ob_fs = [lambda x, cam=cam: 
+                            # cam.project_pinhole(
+                            x[:K*D]
+                            # .view(-1, D)).flatten()
                  for cam in cams]
         min_bounds = torch.tensor([0.0, 0.0], device=means.device)
         max_bounds = torch.tensor([640.0, 480.0], device=means.device)
         ob_ms = [
-            cam.undistort_points(
-                (pts + torch.randn_like(pts) * std.clamp(max=v_vis_max))
-                .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
+            # (cam.undistort_points((pts
+                #   + torch.randn_like(pts) * std.clamp(max=v_vis_max)
+                # ).clamp(min=min_bounds, max=max_bounds)
+                # .view(*Bs, -1)
+                # ) 
+                (gt
+                  + torch.randn_like(gt) * (std.clamp(max=v_vis_max)))
+                .view(*Bs, -1)
             for cam, pts, std in zip(cams, proj, nstd)]
         ob_vs = [
-            cam.undistort_covars(torch.diag_embed((std * std).view(*Bs, -1)))
+            # cam.undistort_covars(
+                torch.diag_embed((std * std).view(*Bs, -1))
+            # )
             for cam, std in zip(cams, nstd)]
         # ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
         # ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
@@ -121,6 +131,6 @@ for pre, post, sim, gt in zip(pre_cov, post_cov, sim_track, track):
     print("-", test_hypothesis(gt, sim, post))
 print("p-value", test_hypothesis(track, sim_track, post_cov))
 plot = visualize.MinimalSkeletonPlayer(
-    sim_track.detach().cpu().view_as(track), fps.item())
+    sim_track.detach().cpu().view_as(track), fps.item(), gt=track)
 plot.setup_cameras(cams)
 plot.show()

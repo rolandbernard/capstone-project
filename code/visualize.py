@@ -284,10 +284,10 @@ class MinimalSkeletonPlayer(SkeletonPlayer):
     Offline skeleton player for a single pre-recorded track.
     """
 
-    def __init__(self, track, fps: float, center=(0, 0, 0), up=(0, -1, 0)):
+    def __init__(self, track, fps: float, center=(0, 0, 0), up=(0, -1, 0), gt=None):
         super().__init__(
-            [], [[{"id": 0, "kpts": frame}] for frame in track],
-            fps, center, up
+            [], [[{"id": 0, "kpts": frame}] for frame in track], fps, center, up,
+            gt_frames=None if gt is None else [[{"id": 0, "kpts": frame}] for frame in gt]
         )
 
 
