@@ -37,18 +37,21 @@ def simulate_kalman_filter(
         # Generate fake observations and perform update.
         proj = [cam.project(gt) for cam in cams]
         nstd = [
-            torch.where(
-                ((pts[..., 0] > 0) & (pts[..., 0] < 640)
-                 & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
-                v_vis_min + torch.rand_like(gt) * (v_vis_max - v_vis_min),
-                torch.full_like(gt, v_inv)
-            )
-            for pts in proj]
-        ob_fs = [lambda x, cam=cam: 
+            # torch.where(
+            #     ((pts[..., 0] > 0) & (pts[..., 0] < 640)
+            #      & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
+            #     v_vis_min + torch.rand_like(gt) * (v_vis_max - v_vis_min),
+            #     torch.full_like(gt, v_inv)
+            # )
+                torch.full_like(gt, 25.0)
+            #for pts in proj
+            ]
+        ob_fs = [lambda x:#, cam=cam: 
                             # cam.project_pinhole(
                             x[:K*D]
                             # .view(-1, D)).flatten()
-                 for cam in cams]
+               #  for cam in cams
+                 ]
         min_bounds = torch.tensor([0.0, 0.0], device=means.device)
         max_bounds = torch.tensor([640.0, 480.0], device=means.device)
         ob_ms = [
@@ -58,14 +61,16 @@ def simulate_kalman_filter(
                 # .view(*Bs, -1)
                 # ) 
                 (gt
-                  + torch.randn_like(gt) * (std.clamp(max=v_vis_max)))
+                  + torch.randn_like(gt) * (nstd[0]))
                 .view(*Bs, -1)
-            for cam, pts, std in zip(cams, proj, nstd)]
+          #  for cam, pts, std in zip(cams, proj, nstd)
+            ]
         ob_vs = [
             # cam.undistort_covars(
-                torch.diag_embed((std * std).view(*Bs, -1))
+                torch.diag_embed((nstd[0] * nstd[0]).view(*Bs, -1))
             # )
-            for cam, std in zip(cams, nstd)]
+            # for cam, std in zip(cams, nstd)
+            ]
         # ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
         # ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
         # ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
