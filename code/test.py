@@ -43,16 +43,19 @@ def simulate_kalman_filter(
         min_bounds = torch.tensor([0.0, 0.0], device=means.device)
         max_bounds = torch.tensor([640.0, 480.0], device=means.device)
         ob_ms = [
-            cam.undistort_points(
-                (pts + torch.randn_like(pts) * std.clamp(max=v_vis_max))
-                .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
+            ((cam.undistort_points(
+                (pts )
+                .clamp(min=min_bounds, max=max_bounds)
+                )+ torch.randn_like(pts) * std.clamp(max=v_vis_max) / 750)
+
+                .view(*Bs, -1))
             for cam, pts, std in zip(cams, proj, nstd)]
         ob_vs = [
-            cam.undistort_covars(torch.diag_embed((std * std).view(*Bs, -1)))
+                torch.diag_embed((std * std).view(*Bs, -1)) / (750*750) * 2
             for cam, std in zip(cams, nstd)]
-        ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
-        ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
-        ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
+        # ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
+        # ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
+        # ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
         ob_f, ob_m, ob_v = kalman.emerge_obs(ob_fs, ob_ms, ob_vs)
         means, covs = kalman.eupdate(means, covs, ob_m, ob_v, ob_f)
         if checks:
@@ -62,11 +65,11 @@ def simulate_kalman_filter(
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
         # Predict next state. (Only if not the last state.)
-        if t != T - 1:
-            means, covs = model.predict_train(dt, means, covs)
-            if checks:
-                for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
-                    util.check_covariance(cov, f"step {t} elem {i} predict")
+        # if t != T - 1:
+        #     means, covs = model.predict_train(dt, means, covs)
+        #     if checks:
+        #         for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
+        #             util.check_covariance(cov, f"step {t} elem {i} predict")
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
@@ -113,7 +116,7 @@ for pre, post, sim, gt in zip(pre_cov, post_cov, sim_track, track):
     print("::", pre.diag().sqrt().mean().tolist(), end=" ")
     print("=>", post.diag().sqrt().mean().tolist(), end=" ")
     print("-", test_hypothesis(gt, sim, post))
-    exit()
+    # exit()
 print("p-value", test_hypothesis(track, sim_track, post_cov))
 plot = visualize.MinimalSkeletonPlayer(
     sim_track.detach().cpu().view_as(track), fps.item(), gt=track)
