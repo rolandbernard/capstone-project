@@ -23,6 +23,9 @@ class LinearPhysics:
         self.init_mean = init_mean
         self.init_cov = init_cov
         self.get_dyn = lru_cache()(self._get_dyn)
+        # Scaling the observation covariances might be beneficial to account for
+        # linearization noise. (Not applied to constraints.)
+        self.obs_cov_scale = 1.0
 
     def _get_dyn(self, dt: float) -> tuple[torch.Tensor, torch.Tensor]:
         """ Create a new dynamics and covariance matrix for the given timestamp. """
@@ -166,6 +169,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
             self.constraints_to_matrix(init.constraints, init.point_mix))
         self.constr_cov = self.as_parameter(init.constr_cov)
         self.constr_val = self.as_parameter(init.constr_val)
+        self.obs_cov_scale = self.as_parameter(
+            torch.tensor(init.obs_cov_scale))
 
     @property
     def device(self):
@@ -181,6 +186,7 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
             self.init_cov.copy_(util.sanitize_covariance(self.init_cov, floor))
             self.constr_cov.copy_(
                 util.sanitize_covariance(self.constr_cov, floor))
+            self.obs_cov_scale.copy_(self.obs_cov_scale.clamp(0, 4))
 
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
         """ Convert a static constraints index array to a matrix. """

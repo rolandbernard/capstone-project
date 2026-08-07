@@ -51,7 +51,7 @@ def simulate_kalman_filter(
                 .view(*Bs, -1))
             for cam, pts, std in zip(cams, proj, nstd)]
         ob_vs = [
-                torch.diag_embed((std * std).view(*Bs, -1)) / (750*750) * 2
+                torch.diag_embed((std * std).view(*Bs, -1)) / (750*750) * model.obs_cov_scale
             for cam, std in zip(cams, nstd)]
         # ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
         # ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))

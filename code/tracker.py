@@ -273,7 +273,7 @@ class Tracker:
         ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:self.num_keypoint*3].view(-1, 3)).flatten()
                  for cam in cams]
         ob_ms = [mean for mean in kpts]
-        ob_vs = [cov for cov in covs]
+        ob_vs = [cov * self.physics.obs_cov_scale for cov in covs]
         # Add pseudo-observation for limb length constraints.
         if isinstance(self.physics, ConstrainedPhysics):
             ob_fs.append(lambda x: self.physics.pseudo_obs(x))  # type: ignore
