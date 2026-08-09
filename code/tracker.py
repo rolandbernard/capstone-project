@@ -74,7 +74,7 @@ class Track:
         marginalized for each keypoint even if there are inter-keypoint variances.
         May return a small diagonal matrix if not implemented.
         """
-        return per_point_cov(self.get_full_covariances())
+        return util.per_point_cov(self.get_full_covariances())
 
     def __getitem__(self, key: str):
         if key == "id":
@@ -82,14 +82,6 @@ class Track:
         if key == "kpts":
             return self.get_keypoints().tolist()
         raise KeyError
-
-
-def per_point_cov(covar: torch.Tensor, num_dim: int = 3) -> torch.Tensor:
-    """ Extract the block diagonal part of the given covariance matrix. """
-    *Bs, N, N = covar.shape
-    by_point = covar.view(-1, N // num_dim, num_dim, N // num_dim, num_dim)
-    blocks = torch.diagonal(by_point, dim1=1, dim2=3)
-    return blocks.permute(0, 3, 1, 2).view(*Bs, -1, num_dim, num_dim)
 
 
 class Tracker:
@@ -218,7 +210,7 @@ class Tracker:
                 mean3d = camera.triangulate_undistorted(
                     m_cams,
                     [m.view(num_detect, -1, 2) for m in m_kpts],
-                    [per_point_cov(c, 2) for c in m_covs]
+                    [util.per_point_cov(c, 2) for c in m_covs]
                 )
                 # Compute cost for reprojection into new camera view.
                 pred_2 = cam_2.project_pinhole(mean3d) \
@@ -347,7 +339,7 @@ class Tracker:
                 mean = camera.triangulate_undistorted(
                     m_cams,
                     [m.view(-1, 2) for m in m_kpts],
-                    [per_point_cov(c, 2) for c in m_covs]
+                    [util.per_point_cov(c, 2) for c in m_covs]
                 ).flatten()
                 track = self.new_track(mean)
                 self.update_track(track, m_cams, m_kpts, m_covs)
@@ -460,7 +452,7 @@ class CrossViewFirstTracker(Tracker):
                     mean = camera.triangulate_undistorted(
                         m_cams,
                         [m.view(-1, 2) for m in m_kpts],
-                        [per_point_cov(c, 2) for c in m_covs]
+                        [util.per_point_cov(c, 2) for c in m_covs]
                     ).flatten()
                     track = self.new_track(mean)
                 else:

@@ -274,6 +274,14 @@ def evaluate_from_files(gt_file: str, pred_file: str, dist_threshold=15.0):
     return evaluate_mot_metrics(gt_frames, pred_frames, dist_threshold)
 
 
+def per_point_cov(covar: torch.Tensor, num_dim: int = 3) -> torch.Tensor:
+    """ Extract the block diagonal part of the given covariance matrix. """
+    *Bs, N, N = covar.shape
+    by_point = covar.view(-1, N // num_dim, num_dim, N // num_dim, num_dim)
+    blocks = torch.diagonal(by_point, dim1=1, dim2=3)
+    return blocks.permute(0, 3, 1, 2).view(*Bs, -1, num_dim, num_dim)
+
+
 def sanitize_covariance(cov: torch.Tensor, floor: float = 1e-6) -> torch.Tensor:
     """ Forces symmetry and projects back onto the positive-definite cone. """
     sym_cov = 0.5 * (cov + cov.mT)

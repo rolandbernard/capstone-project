@@ -311,15 +311,32 @@ def predict(mean: torch.Tensor, cov: torch.Tensor, dyn_mat: torch.Tensor, dyn_co
 
 
 def update_res(
-    mean: torch.Tensor, cov: torch.Tensor, obs_mat: torch.Tensor, obs_res: torch.Tensor, obs_cov: torch.Tensor
+    mean: torch.Tensor, cov: torch.Tensor, obs_mat: torch.Tensor, obs_res: torch.Tensor, obs_cov: torch.Tensor, robust=None
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Apply an update when explicitly given the observation residual. This method
     can be reused both for linear and Extended Kalman filtering.
     """
+    *Bs, N, N = cov.shape
+    if robust is not None:
+        # Inflate uncertainty of outliers to get more robust results. Only do
+        # this for the first robust[0]*robust[1] and split them independently
+        # for each robust[1].
+        K, D = robust
+        inov = util.per_point_cov(
+            (obs_mat[..., :K*D, :] @ cov @ obs_mat[..., :K*D, :].mT
+             + obs_cov[..., :K*D, :K*D]), D)
+        res = obs_res[..., :K*D].view(*Bs, K, D, 1)
+        d = torch.sqrt(
+            (res.mT @ torch.linalg.solve(inov, res)).view(*Bs, -1) + 1e-8)
+        weight = torch.concat([
+            torch.where(d <= 2.0, torch.ones_like(d), d / 2.0)
+            .repeat_interleave(2, dim=-1),
+            torch.ones_like(obs_res[..., K*D:])
+        ], dim=-1)
+        obs_cov = obs_cov * weight * weight.unsqueeze(-1)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
     gain = cov @ torch.linalg.solve(inov.mT, obs_mat).mT
-    *_, N, N = cov.shape
     return (
         mean + (gain @ obs_res.unsqueeze(-1)).squeeze(-1),
         (torch.eye(N, device=gain.device) - gain @ obs_mat) @ cov
@@ -339,7 +356,7 @@ def update(
 
 def eupdate_ex(
     mean: torch.Tensor, cov: torch.Tensor, obs_mean: torch.Tensor, obs_cov: torch.Tensor,
-    obs: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
+    obs: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]], robust=None
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Apply update using Extended Kalman filtering give an explicit formulation of
@@ -347,7 +364,7 @@ def eupdate_ex(
     """
     jac, pred = obs(mean)
     res = obs_mean - pred
-    return update_res(mean, cov, jac, res, obs_cov)
+    return update_res(mean, cov, jac, res, obs_cov, robust)
 
 
 def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -362,11 +379,11 @@ def batched_jacobian(f: Callable[[torch.Tensor], torch.Tensor], x: torch.Tensor)
 
 
 def eupdate(
-    mean: torch.Tensor, cov: torch.Tensor,
-    obs_mean: torch.Tensor, obs_cov: torch.Tensor, obs: Callable[[torch.Tensor], torch.Tensor],
+    mean: torch.Tensor, cov: torch.Tensor, obs_mean: torch.Tensor, obs_cov: torch.Tensor,
+    obs: Callable[[torch.Tensor], torch.Tensor], robust=None
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Apply update using Extended Kalman filtering give an observation function,
     but using PyTorch functionality to automatically compute the Jacobian.
     """
-    return eupdate_ex(mean, cov, obs_mean, obs_cov, lambda x: batched_jacobian(obs, x))
+    return eupdate_ex(mean, cov, obs_mean, obs_cov, lambda x: batched_jacobian(obs, x), robust)
