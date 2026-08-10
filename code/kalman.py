@@ -154,7 +154,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
     A physics model where parameters are designed to be explicitly learned by
     means of gradient based optimization. The basic operations are the same as
     that of the constrained physics and this module can be initialized with an
-    instance `ConstrainedPhysics`.
+    instance `ConstrainedPhysics`. Note that unlike the constrained physics this
+    one assumes all covariances are diagonal matrices for easier parameterization.
     """
 
     def __init__(self, init: ConstrainedPhysics):
@@ -162,12 +163,12 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         self.get_dyn = lru_cache()(self._get_dyn)
         self.num_keypoint = init.num_keypoint
         self.dyn_mat = self.as_parameter(init.dyn_mat)
-        self.dyn_cov = self.as_parameter(init.dyn_cov)
+        self.dyn_cov_diag = self.as_parameter(init.dyn_cov.diag().sqrt())
         self.init_mean = self.as_parameter(init.init_mean)
-        self.init_cov = self.as_parameter(init.init_cov)
+        self.init_cov_diag = self.as_parameter(init.init_cov.diag().sqrt())
         self.constraints = self.as_parameter(
             self.constraints_to_matrix(init.constraints, init.point_mix))
-        self.constr_cov = self.as_parameter(init.constr_cov)
+        self.constr_cov_diag = self.as_parameter(init.constr_cov.diag().sqrt())
         self.constr_val = self.as_parameter(init.constr_val)
         self.obs_cov_scale = self.as_parameter(
             torch.tensor(init.obs_cov_scale))
@@ -176,17 +177,17 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
     def device(self):
         return next(self.parameters()).device
 
-    def sanitize_covariances(self, floor: float = 1e-6):
-        """
-        For all covariances in this model, force their symmetry and project back
-        onto the positive-definite cone. This guarantees that they remain valid.
-        """
-        with torch.no_grad():
-            self.dyn_cov.copy_(util.sanitize_covariance(self.dyn_cov, floor))
-            self.init_cov.copy_(util.sanitize_covariance(self.init_cov, floor))
-            self.constr_cov.copy_(
-                util.sanitize_covariance(self.constr_cov, floor))
-            self.obs_cov_scale.copy_(self.obs_cov_scale.clamp(0, 4))
+    @property
+    def dyn_cov(self):
+        return torch.diag(self.dyn_cov_diag.clamp(1e-6).square())
+
+    @property
+    def init_cov(self):
+        return torch.diag(self.init_cov_diag.clamp(1e-6).square())
+
+    @property
+    def constr_cov(self):
+        return torch.diag(self.constr_cov_diag.clamp(1e-6).square())
 
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
         """ Convert a static constraints index array to a matrix. """

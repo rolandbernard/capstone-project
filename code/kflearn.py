@@ -76,22 +76,19 @@ def simulate_kalman_filter(
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
 
-def compute_loss(pred, covs, gt: torch.Tensor, w_mse: float) -> torch.Tensor:
+def compute_loss(pred, gt: torch.Tensor) -> torch.Tensor:
     """
     Compute the loss between the predictions and the ground truth. Both are
     assumed to be sequences of 3d keypoint detections. The prediction is composed
-    of both a mean and a covariance matrix. The loss is a combination a MSE and
-    a NLL term.
+    of both a mean and a covariance matrix. The loss only makes use of the mean
+    however.
     """
     *Bs, T, K, D = gt.shape
     gt_flat = gt.view(*Bs, T, K * D)
-    mse_loss = nn.functional.mse_loss(pred, gt_flat)
-    dist = torch.distributions.MultivariateNormal(pred, covs)
-    nll_loss = -dist.log_prob(gt_flat).mean()
-    return nll_loss + w_mse * mse_loss
+    return nn.functional.mse_loss(pred, gt_flat)
 
 
-def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer, w_mse: float) -> float:
+def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> float:
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -105,21 +102,18 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer, w_mse
         fps = fps.to(model.device, non_blocking=True)
         track = track.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        pred0, covs0, pred1, covs1 \
-            = simulate_kalman_filter(model, fps, track, cams)
-        loss = compute_loss(pred0, covs0, track, w_mse) \
-            + compute_loss(pred1, covs1, track, w_mse)
+        pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track, cams)
+        loss = compute_loss(pred0, track) + compute_loss(pred1, track)
         loss.backward()
         nn.utils.clip_grad_value_(model.train_parameters(), clip_value=1.0)
         optimizer.step()
         total_loss += loss.item()
         count += 1
         print("==== iter ====")
-        model.sanitize_covariances()
     return total_loss / count
 
 
-def eval_epoch(model, loader, raw_data, w_mse: float) -> float:
+def eval_epoch(model, loader, raw_data) -> float:
     """
     Run a single evaluation round over the given loader. This is intended to be
     used after each epoch to evaluate the performance on the validation set.
@@ -133,16 +127,15 @@ def eval_epoch(model, loader, raw_data, w_mse: float) -> float:
         for fps, track in loader:
             fps = fps.to(model.device, non_blocking=True)
             track = track.to(model.device, non_blocking=True)
-            pred0, covs0, pred1, covs1 \
+            pred0, _, pred1, _ \
                 = simulate_kalman_filter(model, fps, track, cams)
-            loss = compute_loss(pred0, covs0, track, w_mse) \
-                + compute_loss(pred1, covs1, track, w_mse)
+            loss = compute_loss(pred0, track) + compute_loss(pred1, track)
             total_loss += loss.item()
             count += 1
     return total_loss / count
 
 
-def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, w_mse: float, callback=None):
+def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, callback=None):
     """
     Perform multiple training epochs, recoding the history of both training
     and validation loss in the given log directory. This will train using the
@@ -155,8 +148,8 @@ def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, w_mse:
     optimizer = nets.optimizer
     scheduler = nets.scheduler
     for epoch in range(nets.step + 1, num_epochs):
-        tr_loss = train_epoch(model, train, raw_data, optimizer, w_mse)
-        val_loss = eval_epoch(model, val, raw_data, w_mse)
+        tr_loss = train_epoch(model, train, raw_data, optimizer)
+        val_loss = eval_epoch(model, val, raw_data)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,
         }, model, optimizer, scheduler)
@@ -169,7 +162,7 @@ def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, w_mse:
         print("max epoch reached")
 
 
-def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=1.0, testing=False, callback=None):
+def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, testing=False, callback=None):
     """
     Perform multiple training epochs. This will initialize the net storage in
     case we are starting a fresh run, and resume the existing run otherwise. The
@@ -198,4 +191,4 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
         val, 32, shuffle=not testing, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader,
-                 raw_data, num_epochs, w_mse, callback)
+                 raw_data, num_epochs, callback)
