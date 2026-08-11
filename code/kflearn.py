@@ -97,10 +97,12 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
     model.train()
     total_loss = 0
     count = 0
-    cams = [cam.to(model.device) for cam in raw_data.get_some_cams()]
+    cams = [
+        cam.to(device=model.device, dtype=torch.float64)
+        for cam in raw_data.get_some_cams()]
     for fps, track in loader:
-        fps = fps.to(model.device, non_blocking=True)
-        track = track.to(model.device, non_blocking=True)
+        fps = fps.to(model.device, dtype=torch.float64, non_blocking=True)
+        track = track.to(model.device, dtype=torch.float64, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track, cams)
         loss = compute_loss(pred0, track) + compute_loss(pred1, track)
@@ -142,13 +144,14 @@ def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, callba
     saved optimizer, model, and learning rate schedule from the provided net
     storage.
     """
-    # Lower precision to benefit from certain hardware support.
-    torch.set_float32_matmul_precision('high')
     model = nets.net
     optimizer = nets.optimizer
     scheduler = nets.scheduler
     for epoch in range(nets.step + 1, num_epochs):
+        # Using 64bit fot training to avoid some issues in the backwards pass.
+        model.to(dtype=torch.float64)
         tr_loss = train_epoch(model, train, raw_data, optimizer)
+        model.to(dtype=torch.float32)
         val_loss = eval_epoch(model, val, raw_data)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,

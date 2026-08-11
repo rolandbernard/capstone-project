@@ -219,7 +219,7 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         """ Compute the constraint violation. """
         *Bs, _ = x.shape
         values = (self.constraints @ x.view(*Bs, 1, -1, 1)).view(*Bs, 4, -1)
-        dist = torch.linalg.vector_norm(values[..., 0:3, :], dim=-2)
+        dist = torch.sqrt(torch.sum(values[..., 0:3, :].square(), dim=-2) + 1e-6)
         return dist - values[..., 3, :]
 
     def predict_train(self, dt: torch.Tensor, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
