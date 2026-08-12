@@ -173,7 +173,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE))
+    nets = util.net_storage_in(nets_dir, stat_dir, model)#.to(util.DEVICE))
     raw_data = dataset.CmuPanopticDataset(
         f"{os.path.dirname(__file__)}/data/panoptic")
     full_train = dataset.KalmanDataset(

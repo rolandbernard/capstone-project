@@ -219,7 +219,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         """ Compute the constraint violation. """
         *Bs, _ = x.shape
         values = (self.constraints @ x.view(*Bs, 1, -1, 1)).view(*Bs, 4, -1)
-        dist = torch.sqrt(torch.sum(values[..., 0:3, :].square(), dim=-2) + 1e-6)
+        sum_sq = torch.sum(values[..., 0:3, :].square(), dim=-2)
+        dist = torch.sqrt(sum_sq.clamp(1e-6))
         return dist - values[..., 3, :]
 
     def predict_train(self, dt: torch.Tensor, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -336,8 +337,15 @@ def update_res(
             torch.ones_like(obs_res[..., K*D:])
         ], dim=-1)
         obs_cov = obs_cov * weight * weight.unsqueeze(-1)
+    obs_mat = obs_mat.clamp(-10, 10)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
-    gain = cov @ torch.linalg.solve(inov.mT, obs_mat).mT
+    if torch.isnan(inov).any() or torch.isinf(inov).any():
+        raise ValueError("`inov` matrix contains NaN or Inf values prior to torch.linalg.solve!")
+    if torch.isnan(cov).any() or torch.isinf(cov).any():
+        raise ValueError("`cov` matrix contains NaN or Inf values prior to torch.linalg.solve!")
+    if torch.isnan(obs_mat).any() or torch.isinf(obs_mat).any():
+        raise ValueError("`obs_mat` matrix contains NaN or Inf values prior to torch.linalg.solve!")
+    gain = torch.linalg.lstsq(inov, obs_mat @ cov).solution.mT
     return (
         mean + (gain @ obs_res.unsqueeze(-1)).squeeze(-1),
         (torch.eye(N, device=gain.device) - gain @ obs_mat) @ cov
