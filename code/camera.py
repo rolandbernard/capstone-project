@@ -180,7 +180,7 @@ class Camera:
         return ((self.rotation @ points.view(-1, 3, 1)).squeeze(-1)
                 + self.translation).view_as(points)
 
-    def project_pinhole(self, points: torch.Tensor, eps=1e-5) -> torch.Tensor:
+    def project_pinhole(self, points: torch.Tensor) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane.
         This computes normalized camera coordinates and does not take into acount
@@ -194,8 +194,7 @@ class Camera:
         *Bs, M = points.shape
         points_cam = self.world_to_camera(points)
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
-        z = torch.clamp(z, min=eps)
-        return (xy / z).view(*Bs, M//3*2)
+        return (xy / z.clamp(1e-4)).view(*Bs, M//3*2)
 
     def distortion_params(self, xy_norm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -235,7 +234,7 @@ class Camera:
             + self.intrinsic[0:2, 2]
         return uv
 
-    def project(self, points: torch.Tensor, eps=1e-7) -> torch.Tensor:
+    def project(self, points: torch.Tensor) -> torch.Tensor:
         """
         Project a set of 3d points to 2d locations on the cameras image plane. The
         last dimensions of the input should be the points, and the others can be
@@ -246,7 +245,7 @@ class Camera:
         >>> cam.project(pts).tolist()
         [0.5, 1.0]
         """
-        return self.distort_points(self.project_pinhole(points, eps))
+        return self.distort_points(self.project_pinhole(points))
 
     def undistort_points(self, points: torch.Tensor, num_iters: int = 10) -> torch.Tensor:
         """

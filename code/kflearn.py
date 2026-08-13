@@ -14,7 +14,7 @@ from util import NetStorage
 
 def simulate_kalman_filter(
     model: kalman.LearnedPhysics, fps: torch.Tensor, track: torch.Tensor,
-    cams: list[Camera], v_vis_min=2.0, v_vis_max=25.0, v_inv=1e5, checks=False
+    cams: list[Camera] | None = None, v_min=1.0, v_max=15.0, v_inv=1e-5, checks=False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Perform a simulated run of the Kalman filter on the given tracks. Observations
@@ -33,28 +33,37 @@ def simulate_kalman_filter(
         pred0.append(means[..., :K*D])
         covs0.append(covs[..., :K*D, :K*D])
         # Generate fake observations and perform update.
-        proj = [cam.project(gt) for cam in cams]
-        nstd = [
-            torch.where(
-                ((pts[..., 0] > 0) & (pts[..., 0] < 640)
-                 & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
-                v_vis_min + torch.rand_like(pts) * (v_vis_max - v_vis_min),
-                torch.full_like(pts, v_inv)
-            )
-            for pts in proj]
-        ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:K*D].view(-1, D)).flatten()
-                 for cam in cams]
-        min_bounds = torch.tensor([0.0, 0.0], device=means.device)
-        max_bounds = torch.tensor([640.0, 480.0], device=means.device)
-        ob_ms = [
-            cam.undistort_points(
-                (pts + torch.randn_like(pts) * std.clamp(max=v_vis_max))
-                .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
-            for cam, pts, std in zip(cams, proj, nstd)]
-        ob_vs = [
-            cam.undistort_covars(torch.diag_embed((std * std).view(*Bs, -1)))
-            * model.obs_cov_scale
-            for cam, std in zip(cams, nstd)]
+        if cams is None:
+            # Generate fake 3d observations. Hopefully more stable.
+            std = v_min + torch.rand_like(gt) * (v_max - v_min)
+            ob_fs = [lambda x: x[:K*D]]
+            ob_ms = [(gt + torch.randn_like(gt) * std).view(*Bs, -1)]
+            ob_vs = [torch.diag_embed((std * std).view(*Bs, -1))]
+        else:
+            # Generate fake camera observations.
+            proj = [cam.project(gt) for cam in cams]
+            nstd = [
+                torch.where(
+                    ((pts[..., 0] > 0) & (pts[..., 0] < 640)
+                     & (pts[..., 1] > 0) & (pts[..., 1] < 480)).unsqueeze(-1),
+                    v_min + torch.rand_like(pts) * (v_max - v_min),
+                    torch.full_like(pts, v_inv)
+                )
+                for pts in proj]
+            ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:K*D].view(-1, D)).flatten()
+                     for cam in cams]
+            min_bounds = torch.tensor([0.0, 0.0], device=means.device)
+            max_bounds = torch.tensor([640.0, 480.0], device=means.device)
+            ob_ms = [
+                cam.undistort_points(
+                    (pts + torch.randn_like(pts) * std.clamp(max=v_max))
+                    .clamp(min=min_bounds, max=max_bounds).view(*Bs, -1))
+                for cam, pts, std in zip(cams, proj, nstd)]
+            ob_vs = [
+                cam.undistort_covars(
+                    torch.diag_embed((std * std).view(*Bs, -1)))
+                * model.obs_cov_scale
+                for cam, std in zip(cams, nstd)]
         ob_fs.append(lambda x: model.pseudo_obs(x))  # type: ignore
         ob_ms.append(model.constr_val.expand(*Bs, *model.constr_val.shape))
         ob_vs.append(model.constr_cov.expand(*Bs, *model.constr_cov.shape))
@@ -97,14 +106,11 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
     model.train()
     total_loss = 0
     count = 0
-    cams = [
-        cam.to(device=model.device, dtype=torch.float64)
-        for cam in raw_data.get_some_cams()]
     for fps, track in loader:
         fps = fps.to(model.device, dtype=torch.float64, non_blocking=True)
         track = track.to(model.device, dtype=torch.float64, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track, cams)
+        pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track)
         loss = compute_loss(pred0, track) + compute_loss(pred1, track)
         loss.backward()
         nn.utils.clip_grad_value_(model.train_parameters(), clip_value=1.0)
@@ -123,14 +129,13 @@ def eval_epoch(model, loader, raw_data) -> float:
     model.eval()
     total_loss = 0
     count = 0
-    cams = [cam.to(model.device) for cam in raw_data.get_some_cams()]
     # Disable gradients to save memory and compute.
     with torch.inference_mode():
         for fps, track in loader:
             fps = fps.to(model.device, non_blocking=True)
             track = track.to(model.device, non_blocking=True)
             pred0, _, pred1, _ \
-                = simulate_kalman_filter(model, fps, track, cams)
+                = simulate_kalman_filter(model, fps, track)
             loss = compute_loss(pred0, track) + compute_loss(pred1, track)
             total_loss += loss.item()
             count += 1
@@ -173,7 +178,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model)#.to(util.DEVICE))
+    nets = util.net_storage_in(nets_dir, stat_dir, model)  # .to(util.DEVICE))
     raw_data = dataset.CmuPanopticDataset(
         f"{os.path.dirname(__file__)}/data/panoptic")
     full_train = dataset.KalmanDataset(
