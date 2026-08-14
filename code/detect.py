@@ -347,7 +347,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE))
+    nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE), 5e-3)
     full_train = dataset.YoloDataset(
         f"{os.path.dirname(__file__)}/data/yolo/train")
     if testing:
@@ -359,9 +359,9 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
         train = full_train
         val = dataset.YoloDataset(f"{os.path.dirname(__file__)}/data/yolo/val")
     train_loader = DataLoader(
-        train, 32, shuffle=not testing, drop_last=True, num_workers=8,
+        train, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     val_loader = DataLoader(
-        val, 32, shuffle=not testing, drop_last=True, num_workers=8,
+        val, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader, num_epochs, w_mse, callback)

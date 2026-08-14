@@ -107,8 +107,8 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
     total_loss = 0
     count = 0
     for fps, track in loader:
-        fps = fps.to(model.device, dtype=torch.float64, non_blocking=True)
-        track = track.to(model.device, dtype=torch.float64, non_blocking=True)
+        fps = fps.to(model.device, non_blocking=True)
+        track = track.to(model.device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track)
         loss = compute_loss(pred0, track) + compute_loss(pred1, track)
@@ -117,7 +117,6 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
         optimizer.step()
         total_loss += loss.item()
         count += 1
-        print("==== iter ====")
     return total_loss / count
 
 
@@ -153,10 +152,7 @@ def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, callba
     optimizer = nets.optimizer
     scheduler = nets.scheduler
     for epoch in range(nets.step + 1, num_epochs):
-        # Using 64bit fot training to avoid some issues in the backwards pass.
-        model.to(dtype=torch.float64)
         tr_loss = train_epoch(model, train, raw_data, optimizer)
-        model.to(dtype=torch.float32)
         val_loss = eval_epoch(model, val, raw_data)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,
@@ -178,7 +174,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model)  # .to(util.DEVICE))
+    nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE), 1e-4)
     raw_data = dataset.CmuPanopticDataset(
         f"{os.path.dirname(__file__)}/data/panoptic")
     full_train = dataset.KalmanDataset(
@@ -193,10 +189,10 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
         val = dataset.KalmanDataset(
             f"{os.path.dirname(__file__)}/data/kalman/val")
     train_loader = DataLoader(
-        train, 32, shuffle=not testing, drop_last=True, num_workers=8,
+        train, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     val_loader = DataLoader(
-        val, 32, shuffle=not testing, drop_last=True, num_workers=8,
+        val, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader,
                  raw_data, num_epochs, callback)

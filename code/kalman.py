@@ -337,15 +337,8 @@ def update_res(
             torch.ones_like(obs_res[..., K*D:])
         ], dim=-1)
         obs_cov = obs_cov * weight * weight.unsqueeze(-1)
-    obs_mat = obs_mat.clamp(-10, 10)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
-    if torch.isnan(inov).any() or torch.isinf(inov).any():
-        raise ValueError("`inov` matrix contains NaN or Inf values prior to torch.linalg.solve!")
-    if torch.isnan(cov).any() or torch.isinf(cov).any():
-        raise ValueError("`cov` matrix contains NaN or Inf values prior to torch.linalg.solve!")
-    if torch.isnan(obs_mat).any() or torch.isinf(obs_mat).any():
-        raise ValueError("`obs_mat` matrix contains NaN or Inf values prior to torch.linalg.solve!")
-    gain = torch.linalg.lstsq(inov, obs_mat @ cov).solution.mT
+    gain = torch.linalg.solve(inov, obs_mat @ cov).mT
     return (
         mean + (gain @ obs_res.unsqueeze(-1)).squeeze(-1),
         (torch.eye(N, device=gain.device) - gain @ obs_mat) @ cov
