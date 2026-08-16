@@ -179,15 +179,15 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
 
     @property
     def dyn_cov(self):
-        return torch.diag(self.dyn_cov_diag.clamp(1e-6).square())
+        return torch.diag(self.dyn_cov_diag.square() + 1e-6)
 
     @property
     def init_cov(self):
-        return torch.diag(self.init_cov_diag.clamp(1e-6).square())
+        return torch.diag(self.init_cov_diag.square() + 1e-6)
 
     @property
     def constr_cov(self):
-        return torch.diag(self.constr_cov_diag.clamp(1e-6).square())
+        return torch.diag(self.constr_cov_diag.square() + 1e-6)
 
     def constraints_to_matrix(self, constr: torch.Tensor, mix: torch.Tensor) -> torch.Tensor:
         """ Convert a static constraints index array to a matrix. """
@@ -220,7 +220,7 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         *Bs, _ = x.shape
         values = (self.constraints @ x.view(*Bs, 1, -1, 1)).view(*Bs, 4, -1)
         sum_sq = torch.sum(values[..., 0:3, :].square(), dim=-2)
-        dist = torch.sqrt(sum_sq.clamp(1e-6))
+        dist = torch.sqrt(sum_sq + 1e-3)
         return dist - values[..., 3, :]
 
     def predict_train(self, dt: torch.Tensor, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

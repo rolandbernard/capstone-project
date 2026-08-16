@@ -285,7 +285,6 @@ def train_epoch(model, loader, optimizer, w_mse: float):
         pred = model(img)
         loss = compute_loss(pred, gts, model, w_mse)
         loss.backward()
-        nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
         optimizer.step()
         total_loss += loss.item()
         count += 1
@@ -353,15 +352,15 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     if testing:
         # This configuration is only for the sanity check, it is not used for the
         # actual training of the models.
-        train = torch.utils.data.Subset(full_train, range(32, 128))
+        train = torch.utils.data.Subset(full_train, range(32, 160))
         val = torch.utils.data.Subset(full_train, range(32))
     else:
         train = full_train
         val = dataset.YoloDataset(f"{os.path.dirname(__file__)}/data/yolo/val")
     train_loader = DataLoader(
-        train, 32, shuffle=True, drop_last=True, num_workers=8,
+        train, 64, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     val_loader = DataLoader(
-        val, 32, shuffle=True, drop_last=True, num_workers=8,
+        val, 64, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader, num_epochs, w_mse, callback)

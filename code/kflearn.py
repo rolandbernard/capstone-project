@@ -113,10 +113,15 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
         pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track)
         loss = compute_loss(pred0, track) + compute_loss(pred1, track)
         loss.backward()
-        nn.utils.clip_grad_value_(model.train_parameters(), clip_value=1.0)
-        optimizer.step()
-        total_loss += loss.item()
-        count += 1
+        for param in model.train_parameters():
+            if param.grad is not None and not torch.isfinite(param.grad).all():
+                print("warning: skipped due to NaN or Inf gradient")
+                break
+        else:
+            nn.utils.clip_grad_norm_(model.train_parameters(), 5.0)
+            optimizer.step()
+            total_loss += loss.item()
+            count += 1
     return total_loss / count
 
 
