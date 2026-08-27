@@ -158,20 +158,36 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
     one assumes all covariances are diagonal matrices for easier parameterization.
     """
 
-    def __init__(self, init: ConstrainedPhysics):
+    def __init__(self, init: ConstrainedPhysics, random=False):
         nn.Module.__init__(self)
-        self.get_dyn = lru_cache()(self._get_dyn)
         self.num_keypoint = init.num_keypoint
-        self.dyn_mat = self.as_parameter(init.dyn_mat)
-        self.dyn_cov_diag = self.as_parameter(init.dyn_cov.diag().sqrt())
-        self.init_mean = self.as_parameter(init.init_mean)
-        self.init_cov_diag = self.as_parameter(init.init_cov.diag().sqrt())
-        self.constraints = self.as_parameter(
-            self.constraints_to_matrix(init.constraints, init.point_mix))
-        self.constr_cov_diag = self.as_parameter(init.constr_cov.diag().sqrt())
-        self.constr_val = self.as_parameter(init.constr_val)
         self.obs_cov_scale = self.as_parameter(
             torch.tensor(init.obs_cov_scale))
+        self.get_dyn = lru_cache()(self._get_dyn)
+        if random:
+            self.dyn_mat = self.as_parameter(torch.randn_like(init.dyn_mat))
+            self.dyn_cov_diag = self.as_parameter(
+                torch.ones_like(init.dyn_cov.diag()))
+            self.init_mean = self.as_parameter(
+                torch.randn_like(init.init_mean))
+            self.init_cov_diag = self.as_parameter(
+                torch.ones_like(init.init_cov.diag()))
+            self.constraints = self.as_parameter(torch.randn_like(
+                self.constraints_to_matrix(init.constraints, init.point_mix)))
+            self.constr_cov_diag = self.as_parameter(
+                torch.ones_like(init.constr_cov.diag()))
+            self.constr_val = self.as_parameter(
+                torch.zeros_like(init.constr_val))
+        else:
+            self.dyn_mat = self.as_parameter(init.dyn_mat)
+            self.dyn_cov_diag = self.as_parameter(init.dyn_cov.diag().sqrt())
+            self.init_mean = self.as_parameter(init.init_mean)
+            self.init_cov_diag = self.as_parameter(init.init_cov.diag().sqrt())
+            self.constraints = self.as_parameter(
+                self.constraints_to_matrix(init.constraints, init.point_mix))
+            self.constr_cov_diag = self.as_parameter(
+                init.constr_cov.diag().sqrt())
+            self.constr_val = self.as_parameter(init.constr_val)
 
     @property
     def device(self):
