@@ -161,8 +161,6 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
     def __init__(self, init: ConstrainedPhysics, random=False):
         nn.Module.__init__(self)
         self.num_keypoint = init.num_keypoint
-        self.obs_cov_scale = self.as_parameter(
-            torch.tensor(init.obs_cov_scale))
         self.get_dyn = lru_cache()(self._get_dyn)
         if random:
             self.dyn_mat = self.as_parameter(torch.randn_like(init.dyn_mat))
@@ -188,6 +186,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
             self.constr_cov_diag = self.as_parameter(
                 init.constr_cov.diag().sqrt())
             self.constr_val = self.as_parameter(init.constr_val)
+        self.obs_cov_scale = self.as_parameter(
+            torch.tensor(init.obs_cov_scale))
 
     @property
     def device(self):
