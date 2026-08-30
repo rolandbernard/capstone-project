@@ -1,0 +1,420 @@
+\documentclass[aspectratio=1610]{beamer}
+
+\usepackage{graphicx}
+\usepackage[english]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{csquotes, xcolor, xspace, changepage, setspace, listings}
+\usepackage{libertinus}
+\usepackage{roboto}
+\usepackage{fontawesome5}
+\usepackage[scale = 0.75]{plex-mono}
+\usepackage{tikz, subcaption}
+
+\usetikzlibrary{fit, shapes.geometric, shapes.symbols, positioning, shapes.misc, calc, arrows.meta, patterns, backgrounds, decorations, decorations.markings, decorations.pathreplacing, shadows, hobby}
+
+\usepackage[backend=bibtex,style=authoryear]{biblatex}
+\addbibresource{biblio.bib}
+
+\title{3D Human Pose Tracking \\ using Multi-View 2D Detections}
+\author{Roland Bernard}
+\date{June 2026}
+
+\definecolor{unibzblue}{HTML}{0086ec}
+\definecolor{unibzblue2}{HTML}{f0f8ff}
+
+\setbeamercolor{outerbox}{fg=black,bg=unibzblue2}
+\setbeamercolor{innerbox}{fg=white,bg=unibzblue}
+
+\setbeamertemplate{title page}{
+  \scriptsize 
+  \begin{tabular}{ll}
+    \vspace*{40mm} \\
+    \multicolumn{2}{l}{\raggedright Project Presentation -- Computer Vision 2025/2026} \\
+    \\
+    \multicolumn{2}{p{\linewidth}}{\raggedright \huge \bf \inserttitle} \\
+    \\
+    \\
+    & \insertauthor \\
+    \\
+    & \insertdate \\
+  \end{tabular}
+}
+
+\setbeamertemplate{frametitle}{
+  \vspace*{6mm}
+  \Large \bf \color{black} \insertframetitle
+}
+
+\setbeamertemplate{itemize items}{\scriptsize\raisebox{0.6mm}{\color{unibzblue} $\blacktriangleright$}}
+
+\beamertemplatenavigationsymbolsempty
+\setbeamertemplate{footline}{
+  \begin{beamercolorbox}[wd=\paperwidth,right]{section in head/foot}
+    \usebeamerfont{date in head/foot}\hspace*{2em}
+    \insertframenumber{}\hspace*{2mm} 
+    \vspace*{2mm}
+  \end{beamercolorbox}
+}
+
+\newcommand{\litem}{{\scriptsize\raisebox{0.6mm}{\color{unibzblue} $\blacktriangleright$}}}
+\newcommand{\sitem}{{\scriptsize\raisebox{0.2mm}{\color{unibzblue} $\rightarrow$}}\enspace}
+\newcommand{\icon}[1]{\textcolor{unibzblue}{\faIcon[solid]{#1}}}
+
+\newlength{\offsetpage}
+\newenvironment{narrowpage}[1][3mm]{
+  \setlength{\offsetpage}{#1}
+  \begin{adjustwidth}{\offsetpage}{\offsetpage}
+}{
+  \end{adjustwidth}
+}
+\newenvironment{widepage}[1][10mm]{
+  \setlength{\offsetpage}{#1}
+  \begin{adjustwidth}{-\offsetpage}{-\offsetpage}
+}{
+  \end{adjustwidth}
+}
+
+\newenvironment{items}{
+  \begin{narrowpage}
+}{
+  \end{narrowpage}
+}
+\newenvironment{oitem}[2][3mm]{
+  \vspace*{2mm}
+  \begin{beamercolorbox}[rounded=false,colsep=#1]{outerbox}
+    \parbox[t]{2mm}{\centering#2}\parbox[t]{2mm}{\ }%
+    \begin{minipage}[t]{\linewidth}
+}{
+    \end{minipage}
+  \end{beamercolorbox}
+  \vfill
+}
+
+\input{tikzfigures/defs.tex}
+
+\begin{document}
+
+\begin{frame}[plain]
+  \begin{tikzpicture}[
+    remember picture, overlay,
+    every path/.style={opacity=0.10},
+    yshift=20, xshift=200, scale=1.5, transform shape
+  ]
+    \node {\includegraphics[width=0.9\linewidth]{figures/background.png}};
+  \end{tikzpicture}
+  \titlepage
+\end{frame}
+
+\begin{frame}
+\frametitle{Introduction}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Problem: {\footnotesize Track poses of multiple people in videos across multiple views.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Possible Applications: \\
+      \sitem {\footnotesize Robotics and human-robot interactions.} \\
+      \sitem {\footnotesize In healthcare, for tasks such as gait analysis or remote patient monitoring.} \\
+      \sitem {\footnotesize For real-time motion capture or natural body-based control interfaces for gaming.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Objectives of this project: \\
+      \sitem {\footnotesize Develop and evaluate a 3D pose tracking pipeline.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=0.9\linewidth]{figures/approach.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Task Formulation}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Given: \\
+      \sitem {\footnotesize Multiple video sequences containing multiple people.} \\
+      \sitem {\footnotesize Recorded synchronously from multiple camera views.} \\
+      \sitem {\footnotesize Camera calibration parameters, including extrinsics, intrinsic and distortion.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Output: \\
+      \sitem {\footnotesize 3D coordinates of skeletal joints for each subject.} \\
+      \sitem {\footnotesize Temporally consistent movement of skeletal joints over time.}
+    \end{oitem}
+    \begin{center}
+      \begin{tikzpicture}[
+          node distance=10mm,>=Latex,
+          base_node/.style={minimum height=5mm,align=center,text width=3cm},
+          icon_node/.style={minimum size=7mm,align=center}
+      ]
+          \node (satellite) [icon_node] {\fontsize{40pt}{40pt}\selectfont\faVideo};
+          \node [below=1mm of satellite, font=\scriptsize] {Calibrated Cameras};
+          \node [base_node, right=of satellite, inner sep=-5mm, yshift=6, xshift=6] {\includegraphics[width=15mm]{figures/examples/example1.png}};
+          \node [base_node, right=of satellite, inner sep=-5mm, yshift=4, xshift=4] {\includegraphics[width=15mm]{figures/examples/example2.png}};
+          \node [base_node, right=of satellite, inner sep=-5mm, yshift=2, xshift=2] {\includegraphics[width=15mm]{figures/examples/example3.png}};
+          \node (image_data) [base_node, right=of satellite, inner sep=-5mm] {\includegraphics[width=15mm]{figures/examples/example4.png}};
+          \node [below=6.25mm of image_data, font=\scriptsize] {Multi-View Video};
+          \node (machine_learning) [icon_node, right=of image_data] {
+            \fontsize{40pt}{40pt}\selectfont\faRobot
+          };
+          \node [below=1mm of machine_learning, font=\scriptsize] {CV System};
+          \node (pred) [base_node, right=of machine_learning, inner sep=-5mm] {\includegraphics[width=15mm]{figures/example-out.png}};
+          \node [below=6.25mm of pred, font=\scriptsize] {Predict 3D Skeletons};
+          \draw[->, thick] (satellite) -- (image_data);
+          \draw[->, thick] (image_data) -- (machine_learning);
+          \draw[->, thick] (machine_learning) -- (pred);
+      \end{tikzpicture}
+    \end{center}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{System Architecture -- Overview}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Perform single-view single-frame 2D estimation using pretrained model.} \\
+      \sitem {\footnotesize Cross-view and prediction-view matching of detections using Mahalanobis distance.} \\
+      \sitem {\footnotesize Fusion of 2D observations into 3D skeletal trajectories using extended Kalman filter.}
+    \end{oitem}
+    \input{tikzfigures/architecture.tex}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{System Architecture -- 2D Detections}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Using YOLO26-pose family of models for the detector.} \\
+      \sitem {\footnotesize Dynamically scale observation covariances based on YOLO keypoint confidence.} \\
+      \sitem {\footnotesize Transform 2D pixel coordinates into normalized camera coordinates.}
+    \end{oitem}
+    \input{tikzfigures/detection.tex}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{System Architecture -- Data Association}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Two-step process: \\
+      \sitem {\footnotesize For each view, try to associate detections to predicted 3D state.} \\
+      \sitem {\footnotesize For all unmatched detections, try to associate between different views.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      For all cross-view matches: \\
+      \sitem {\footnotesize Triangulate 3D keypoint locations using all matched views to initialize tracks.}
+    \end{oitem}
+    \vspace*{-6mm}
+    \input{tikzfigures/association.tex}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{System Architecture -- Extended Kalman Filtering}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize State representation contains 3D position and velocity for each keypoint.} \\
+      \sitem {\footnotesize Prediction uses standard linear velocity model.} \\
+      \sitem {\footnotesize All associated observations are concatenated and considered at once.} \\
+      \sitem {\footnotesize Since the observation process is non-linear extended Kalman filtering is used.}
+    \end{oitem}
+    \input{tikzfigures/kalman.tex}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Dataset Overview -- CMU Panoptic Dataset}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Source: \\
+      \sitem {\footnotesize Video captured in a specialized 5.49m diameter dome-shaped room.} \\
+      \sitem {\footnotesize Equipped with hundreds of inward facing cameras attached to the outside panels.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Format and Data Characteristics: \\
+      \sitem {\footnotesize 84 video sequences totaling approximately 11.5 hours of video.} \\
+      \sitem {\footnotesize VGA cameras recording at a 640×480 resolution
+at 25 fps.} \\
+      \sitem {\footnotesize Includes ground truth 3D skeletons and
+tracks n COCO19 format.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \begin{subfigure}[b]{0.59\textwidth}
+        \begin{subfigure}[t]{\linewidth}
+          \begin{subfigure}[t]{0.30\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{figures/examples/example1.png}
+          \end{subfigure}
+          \begin{subfigure}[t]{0.30\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{figures/examples/example2.png}
+          \end{subfigure}
+          \begin{subfigure}[t]{0.30\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{figures/examples/example3.png}
+          \end{subfigure}
+        \end{subfigure}
+        \begin{subfigure}[t]{\linewidth}
+          \begin{subfigure}[t]{0.30\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{figures/examples/example6.png}
+          \end{subfigure}
+          \begin{subfigure}[t]{0.30\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{figures/examples/example7.png}
+          \end{subfigure}
+          \begin{subfigure}[t]{0.30\linewidth}
+            \centering
+            \includegraphics[width=\linewidth]{figures/examples/example8.png}
+          \end{subfigure}
+        \end{subfigure}
+      \end{subfigure}
+      \begin{subfigure}[b]{0.36\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/cmu-panoptic.png}
+      \end{subfigure}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Experimental Setup}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Setup: \\
+      \sitem {\footnotesize Run evaluation on a subset of 5 sequences from the dataset.} \\
+      \sitem {\footnotesize Compare generated pose tracks against ground truth annotations.} \\
+      \sitem {\footnotesize Evaluate using variating number of camera views and differently sized YOLO models.} \\
+      \sitem {\footnotesize Using hand selected parameters for the system.} \\
+      \sitem {\footnotesize Also record timing statistics for evaluation of algorithm efficiency.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Evaluation Metrics: \\
+      \sitem {\footnotesize Mean Per-Joint Position Error (MPJPE).} \\
+      \sitem {\footnotesize Multi-Object Tracking Accuracy (MOTA).} \\
+      \sitem {\footnotesize Also collected Precision and Recall.}
+    \end{oitem}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Quantitative Results -- Runtime Efficiency}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Main Finding: \\
+      \sitem {\footnotesize Detection is the largest part of the execution time per frame.} \\
+      \sitem {\footnotesize Execution time of detection scales linearly with number of cameras.} \\
+      \sitem {\footnotesize Matching and filtering also scale with camera count but slight less quickly.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/execution_time_breakdown_cams.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Quantitative Results -- Performance vs. Model Size}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Main Finding: \\
+      \sitem {\footnotesize Larger models improve both MOTA and MPJPE metrics.} \\
+      \sitem {\footnotesize Especially large version gives good results.} \\
+      \sitem {\footnotesize Small and medium version are not significantly better than nano version.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/model_comparison_4_cams.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Quantitative Results -- Performance vs. Camera Count}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Main Finding: \\
+      \sitem {\footnotesize Adding more cameras significantly improves MPJPE.} \\
+      \sitem {\footnotesize Additional views slightly reduce MOTA due to more false positives.} \\
+      \sitem {\footnotesize More camera views is more effective than larger model capacity for MPJPE.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Qualitative Results}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Common failure modes: \\
+      \sitem {\footnotesize Partially occluded persons keypoints drifting.} \\
+      \sitem {\footnotesize Inactive track seen by only one camera can not cause track creation.} \\
+      \sitem {\footnotesize Active track seen by only one camera can cause drift.} \\
+      \sitem {\footnotesize Detection of person while exiting when ground truth is missing.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \hfill
+      \begin{subfigure}[t]{0.19\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/qualitative1.png}
+      \end{subfigure}
+      \hfill
+      \begin{subfigure}[t]{0.19\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/qualitative2.png}
+      \end{subfigure}
+      \hfill
+      \begin{subfigure}[t]{0.19\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/qualitative3.png}
+      \end{subfigure}
+      \hfill
+      \begin{subfigure}[t]{0.19\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/qualitative4.png}
+      \end{subfigure}
+      \hfill
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Conclusion}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Implemented an EKF framework that merges multi-view observations.} \\
+      \sitem {\footnotesize Analyzed performance across different model sizes and camera densities.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Limitations: \\
+      \sitem {\footnotesize Struggles significantly with occlusions.} \\
+      \sitem {\footnotesize Running 2D pose estimation on every camera view remains a performance bottleneck.}
+    \end{oitem}
+    \begin{oitem}{\litem}
+      Possible Future Improvements: \\
+      \sitem {\footnotesize Add constraints that force anatomical consistency of joints.}\\
+      \sitem {\footnotesize Data-driven learning filter parameters.} \\
+      \sitem {\footnotesize Fine-tuning of the 2D pose estimation model.} \\
+      \sitem {\footnotesize Use of a particle filter with occlusion aware likelihood.}
+    \end{oitem}
+  \end{items}
+\end{frame}
+
+
+{
+\setbeamercolor{background canvas}{bg=black}
+\begin{frame}[plain]{}
+\end{frame}
+}
+
+\end{document}
