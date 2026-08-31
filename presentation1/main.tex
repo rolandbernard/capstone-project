@@ -15,9 +15,9 @@
 \usepackage[backend=bibtex,style=authoryear]{biblatex}
 \addbibresource{biblio.bib}
 
-\title{3D Human Pose Tracking \\ using Multi-View 2D Detections}
+\title{Markerless 3D Human Pose Tracking}
 \author{Roland Bernard}
-\date{June 2026}
+\date{September 2026}
 
 \definecolor{unibzblue}{HTML}{0086ec}
 \definecolor{unibzblue2}{HTML}{f0f8ff}
@@ -28,15 +28,20 @@
 \setbeamertemplate{title page}{
   \scriptsize 
   \begin{tabular}{ll}
-    \vspace*{40mm} \\
-    \multicolumn{2}{l}{\raggedright Project Presentation -- Computer Vision 2025/2026} \\
+    \vspace*{45mm} \\
+    \multicolumn{2}{l}{\raggedright Project Presentation -- Capstone Project 2025/2026} \\
     \\
     \multicolumn{2}{p{\linewidth}}{\raggedright \huge \bf \inserttitle} \\
     \\
     \\
+    \begin{tabular}{rl}
     & \insertauthor \\
-    \\
-    & \insertdate \\
+    & \\
+    \tiny Tutor & Oswald Lanz \\
+    \tiny Domain Expert & Marco Boschetti (Covision Lab) \\
+    & \\
+    \tiny Date & \insertdate \\
+    \end{tabular}
   \end{tabular}
 }
 
@@ -227,6 +232,96 @@
 \end{frame}
 
 \begin{frame}
+\frametitle{Skeletal Constraints}
+  \begin{items}
+    % TODO
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Learning Parameters from Data}
+  \begin{items}
+    % TODO
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Learning Parameters from Data -- Custom YOLO Head}
+  \begin{items}
+    % TODO
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Learning Parameters from Data -- Kalman Filter}
+  \begin{items}
+    % TODO
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Learning Parameters from Data -- Other Parameters}
+  \begin{items}
+    % TODO
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
 \frametitle{Dataset Overview -- CMU Panoptic Dataset}
   \begin{items}
     \begin{oitem}{\litem}
@@ -287,10 +382,9 @@ tracks n COCO19 format.}
   \begin{items}
     \begin{oitem}{\litem}
       Setup: \\
-      \sitem {\footnotesize Run evaluation on a subset of 5 sequences from the dataset.} \\
+      \sitem {\footnotesize Run evaluation on a subset of 8 sequences from the dataset.} \\
       \sitem {\footnotesize Compare generated pose tracks against ground truth annotations.} \\
       \sitem {\footnotesize Evaluate using variating number of camera views and differently sized YOLO models.} \\
-      \sitem {\footnotesize Using hand selected parameters for the system.} \\
       \sitem {\footnotesize Also record timing statistics for evaluation of algorithm efficiency.}
     \end{oitem}
     \begin{oitem}{\litem}
@@ -351,6 +445,38 @@ tracks n COCO19 format.}
 \end{frame}
 
 \begin{frame}
+\frametitle{Quantitative Results -- Skeletal Constraints}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Main Finding: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Quantitative Results -- Learned Parameters}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Main Finding: \\
+      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
+      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
+      \sitem {\footnotesize Id ut nihil aut et numquam.}
+    \end{oitem}
+    \begin{figure}
+      \centering
+      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+    \end{figure}
+  \end{items}
+\end{frame}
+
+\begin{frame}
 \frametitle{Qualitative Results}
   \begin{items}
     \begin{oitem}{\litem}
@@ -393,18 +519,19 @@ tracks n COCO19 format.}
     \begin{oitem}{\litem}
       Summary: \\
       \sitem {\footnotesize Implemented an EKF framework that merges multi-view observations.} \\
-      \sitem {\footnotesize Analyzed performance across different model sizes and camera densities.}
+      \sitem {\footnotesize Incorporated skeletal length consistency constraints.} \\
+      \sitem {\footnotesize Implemented simple learning of parameters from data.} \\
+      \sitem {\footnotesize Analyzed performance across different system configuration.}
     \end{oitem}
     \begin{oitem}{\litem}
       Limitations: \\
-      \sitem {\footnotesize Struggles significantly with occlusions.} \\
-      \sitem {\footnotesize Running 2D pose estimation on every camera view remains a performance bottleneck.}
+      \sitem {\footnotesize Still struggles significantly with occlusions.} \\
+      \sitem {\footnotesize Running 2D pose estimation remains a performance bottleneck.}
     \end{oitem}
     \begin{oitem}{\litem}
       Possible Future Improvements: \\
-      \sitem {\footnotesize Add constraints that force anatomical consistency of joints.}\\
-      \sitem {\footnotesize Data-driven learning filter parameters.} \\
-      \sitem {\footnotesize Fine-tuning of the 2D pose estimation model.} \\
+      \sitem {\footnotesize Add more constraints that force other known properties, such as joint angles.}\\
+      \sitem {\footnotesize Find more stable learning methods for the Kalman filter parameters.} \\
       \sitem {\footnotesize Use of a particle filter with occlusion aware likelihood.}
     \end{oitem}
   \end{items}

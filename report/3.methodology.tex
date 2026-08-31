@@ -3,7 +3,7 @@
 
 \section{Methodology} \label{methodology}
 
-This section of the report will detail the architectures of the tracking system developed in the project. Further it covers the selected evaluation metrics and how evaluation was performed.
+This section of the report will detail the architectures of the tracking system developed in the project.
 
 
 \subsection{System Architecture} \label{arch}
@@ -107,48 +107,3 @@ To prevent spurious detections from creating false tracks, we manage the lifecyc
   \caption{Average per-frame runtime of the tracking system for different camera and model configurations. Times are given in seconds.}
   \label{fig:perf}
 \end{table*}
-
-\subsection{Evaluation Procedure} \label{eval-proc}
-
-For this project the system has been evaluated by comparing its 3D tracking predictions frame-by-frame against the ground truth annotations in the CMU Panoptic dataset. The experiments were run across all five selected sequences mentioned in \cref{dataset-desc}, evaluating various combinations of YOLO pose estimation models, testing \inlinecode{YOLO26n-pose}, \inlinecode{YOLO26s-pose}, \inlinecode{YOLO26m-pose}, and \inlinecode{YOLO26l-pose}, and spacial view densities of 4, 8, 12, and 16. Note that due to computation demands, only the \inlinecode{YOLO26n-pose} model has been tested with more than 4 cameras. All evaluations were performed on AMD Ryzen AI 9 HX 370 CPU with most PyTorch \parencite{paszke2019pytorch,ansel2024pytorch} operation running on the integrated AMD Radeon 890M GPU.
-
-Due to the scope of the project, system parameter of the system were initialized heuristically rather than via exhaustive grid-search or end-to-end learning. While these rigid parameter values are functional, an identified area for improvement is optimizing them directly from tracking data either using grid search or end-to-end learning.
-
-Detection thresholds for the YOLO based detector we set to $\tau_{obj} = 0.5$ and $\tau_{kpt} = 0.25$, using also $N_{kpt} = 3$ as the minimum number of visible keypoints. The minimum pixel variance has been set to $\sigma_{min}^2 = 16.0$ pixels$^2$, with visibility and invisibility scale variances set to $\sigma_{vis}^2 = 0.005$ and $\sigma_{inv}^2 = 5$. The matching thresholds for both cross-view and prediction-view matching have both been set to $\theta_{mn} = \theta_{mo} = 0$. For the tracking lifecycle we configured the age for tentative track promotion to $N_{age} = 3$ and the maximum duration without detections for active tracks to $N_{inv} = 10$. Finally, the continuous physic matrices have been set as follows:
-\begin{align*}
-    \mathbf{F} = \begin{bmatrix} \mathbf{0}_{51 \times 51} & \mathbf{I}_{51 \times 51} \\ \mathbf{0}_{51 \times 51} & -0.5 \cdot \mathbf{I}_{51 \times 51} \end{bmatrix}, & \;
-    \mathbf{Q} = \begin{bmatrix} \sigma_{p}^2 \cdot \mathbf{I}_{51 \times 51} & \mathbf{0}_{51 \times 51} \\ \mathbf{0}_{51 \times 51} & \sigma_{v}^2 \cdot \mathbf{I}_{51 \times 51} \end{bmatrix}
-\end{align*}
-with $\sigma_{v}^2 = (2 \frac{m}{s})^2$ and $\sigma_{p}^2 = (5 cm)^2$. This matrix models constant velocity dynamics with a damping term of $-0.5$ on velocity to stabilize motion predictions.
-
-
-\subsection{Evaluation Metrics} \label{eval-metrics}
-
-To measure tracking and reconstruction performance, this project makes use of standard metrics from the Multi-Object Tracking and 3D Pose Estimation literature \parencite{bernardin2008evaluating,ionescu2013human3}. All measures are reported in centimeters, and we use a mean joint error of 15 centimeters as the threshold for matches for all metrics except MPJPE.
-
-\paragraph{Mean Per-Joint Position Error (MPJPE)}
-MPJPE measures the average 3D Euclidean distance between predicted and ground truth keypoints across all matched frames and joints.
-\begin{align*}
-    \text{MPJPE} &= \frac{1}{N_{matched}} \sum_{i=1}^{N_{matched}} \left( \frac{1}{17} \sum_{k=1}^{17} \|\mathbf{p}_{k,i}^{pred} - \mathbf{p}_{k,i}^{gt}\|_2 \right)
-\end{align*}
-For this metric we do not apply a matching threshold, instead matching all predictions against the best matching ground truth track via Hungarian method based assignment.
-
-\paragraph{Multi-Object Tracking Accuracy (MOTA)}
-MOTA evaluates overall tracking performance by accounting for three types of errors, false positives, false negatives, and identity switches:
-\begin{align*}
-    \text{MOTA} &= 1.0 - \frac{\sum_{t} \text{FN}_t + \text{FP}_t + \text{IDS}_t}{\sum_{t} \text{GT}_t}
-\end{align*}
-where $\text{FN}_t$ is the number of false negatives, $\text{FP}_t$ the number of false positives, $\text{IDS}_t$ that of identity switches, and $\text{GT}_t$ is the number of ground truth individuals in frame $t$.
-
-\paragraph{Multi-Object Tracking Precision (MOTP)}
-MOTP measures the alignment of tracked objects by calculating the average distance error for correctly matched targets. Note that in contrast to MPJPE this metric is only computed over the true positives matched within the 15 centimeters maximum threshold.
-\begin{align*}
-    \text{MOTP} &= \frac{\sum_{t,d} \frac{1}{17} \sum_{k=1}^{17} \|\mathbf{p}_{t,d,k}^{pred} - \mathbf{p}_{t,d,k}^{gt}\|_2}{\sum_{t} \text{TP}_t}
-\end{align*}
-where $\text{TP}_t$ is the number of true positives.
-
-\paragraph{Precision and Recall}
-Finally, we also report the standard precision and recall metrics.
-\begin{align*}
-    \text{Precision} = \frac{\sum_t \text{TP}_t}{\sum_t \text{TP}_t + \text{FP}_t}, &\quad \text{Recall} = \frac{\sum_t \text{TP}_t}{\sum_t \text{TP}_t + \text{FN}_t}
-\end{align*}
