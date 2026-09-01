@@ -1,16 +1,18 @@
 
 \section{Background} \label{background}
-
+% TODO remove all direct mentions of the computer vision course, but keep the references
+% TODO say that this is relevant background knowledge for the system
 This project builds directly upon concepts covered in the Computer Vision course \parencite{Lanz2026Notes}, particularly the chapters on Recognition and Object Tracking.
 
 \subsection{Object Detection and Pose Estimation} \label{detection}
 
 In object detection the goal is to localize all object, the number of which is not known a priori, in images \parencite[p. 122-128]{Lanz2026Notes}. Like many computer vision recognition tasks, the field of object detection has evolved significantly with the introduction of deep learning \parencite[p. 113]{Lanz2026Notes}. Deep learning-based object detection has evolved through two primary paradigms. Anchor-based models, like R-CNN or YOLO, rely on predefined bounding box priors of various scales and predicting offsets from these anchors. In contrast, anchor-free models predict bounding boxes directly from point features or keypoint combinations. The main focus of the course, and also the method used in this project, fall under the anchor-based models.
-
+% TODO remove course reference
 In the course we focused mainly on two stage detectors, specifically the R-CNN family of model \parencite[p. 125-127]{Lanz2026Notes}. In these models, there are two separate inference stages. The first stage generates a large number of candidate regions and the second stage then classifies these regions. Fast R-CNN \parencite{girshick2015fast} and Faster R-CNN \parencite{ren2015faster} improve inference speed over the original R-CNN by using a shared feature backbone for both stages and by using a Region Proposal Network to create candidate regions.
 
 In contrast to these two-stage detectors, the YOLO model used in this project is a single stage detector. It works by dividing the input image into multiple grids of different resolutions. Then a CNN based architecture is employed to extract features for each of the grid positions. Finally, one or more prediction head are applied to the resulting feature maps to simultaneously predict both object presence and bound box offsets from grid location defined anchors. The main advantage of single-stage approaches is that they are usually faster than two-stage approaches, although they often perform worse in practice \parencite[p. 126-127]{Lanz2026Notes}.
 
+% TODO mention how a custom head has been trained to predict the variances
 Once an object is detected, one can append extra heads to the feature maps to also predict other properties about the objects. An example of this approach is discussed in the course through the Mask R-CNN architecture \parencite{he2017mask} which predicts instance masks for each detected object \parencite[p. 128]{Lanz2026Notes}. However, this approach can also be applied to Human Pose Estimation, where the additional output head of the network is instead used to predict keypoint locations \parencite{maji2022yolo}. This approach is taken by the YOLO26 models used in this project \parencite{ultralyticsYOLO,sapkota2025yolo26,sapkota2025ultralytics}.
 
 

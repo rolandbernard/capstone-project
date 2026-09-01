@@ -5,6 +5,25 @@ This section of the report will present the evaluation results obtained by the d
 
 \subsection{Runtime Efficiency} \label{effic}
 
+% TODO mention that efficiency has been tested using the simple version without learned component ot skeletal constraints 
+% TODO update all of the results
+\begin{table*}[!ht]
+  \centering
+  \begin{tabular}{|r|r|c|c|c|c|c|c|c|}
+  \hline
+    Model & \# Cameras & Detection & Matching & EKF Update & EKF Prediction & Total \\ \hline
+    \multirow{4}{*}{YOLO26n-pose}  & 4 & 0.0445 & 0.0166 & 0.0080 & 0.0005 & 0.0697 \\ \cline{2-7}
+      & 8 & 0.0840 & 0.0313 & 0.0127 & 0.0006 & 0.1288 \\ \cline{2-7}
+      & 12 & 0.1324 & 0.0431 & 0.0165 & 0.0006 & 0.1929 \\ \cline{2-7}
+      & 16 & 0.1805 & 0.0567  & 0.0210 & 0.0007 & 0.2592 \\ \hline \hline
+    YOLO26s-pose & 4 & 0.0876 & 0.0178 & 0.0083 & 0.0005 & 0.1145 \\ \hline
+    YOLO26m-pose & 4 & 0.2519 & 0.0177 & 0.0083 & 0.0005 & 0.2786 \\ \hline
+    YOLO26l-pose & 4 & 0.2613 & 0.0177 & 0.0083 & 0.0005 & 0.2879 \\ \hline
+  \end{tabular}
+  \caption{Average per-frame runtime of the tracking system for different camera and model configurations. Times are given in seconds.}
+  \label{fig:perf}
+\end{table*}
+
 \Cref{fig:perf} shows the mean per-frame runtime of the developed tracking system across the selected test sequences for different camera count and model capacity configurations. It can be seen that across every single configuration, the detection step consumes the vast majority of the processing time. For the base setup with YOLO26n-pose and 4 camera vies, detection takes 0.0445 seconds out of a 0.0697-second total which equals approximately 64\% of the frame time. This discrepancy becomes wider when increasing the model capacity. For the larges model, YOLO26l-pose, still with only 4 cameras, the detection takes up to 0.2613 seconds out of a total of 0.2879 seconds, which represents approximately 91\% of the time.
 
 When adding more camera views to the system using the smallest model, the computational load predictably increases. Because the detection model has to run a forward pass on every single camera feed, detection time scales almost perfectly linearly with the number of cameras, from 0.045s for 4 cameras to 0.181s for 16. Steps like matching and EKF updates also scale up as camera counts increase because these need to handle more cross-camera data points to associate and filter. However, their growth is somewhat slower than the linear increase for detection. The EKF prediction step is largely a negligible part of the overall system runtime.
@@ -13,6 +32,8 @@ When keeping the camera count at 4 but upgrading the YOLO architecture to larger
 
 With the fastest configuration tested, the system achieves only around 14.3 fps. This is likely insufficient for real-time applications. However, it should be noted that not much effort has gone into optimization of the implementation, and that the test where performed on relatively weak integrated GPU hardware.
 
+% TODO mention that these results for camera count, scene difficulty, and model size were using the simple configuration.
+% TODO update all of the results
 \begin{table*}[!ht]
   \centering
   \begin{tabular}{|r|r|c|c|c|c|c|}
@@ -30,6 +51,8 @@ With the fastest configuration tested, the system achieves only around 14.3 fps.
   \label{fig:eval-results}
 \end{table*}
 
+% TODO update with correct scenes
+% TODO update all of the results
 \begin{table*}[!ht]
   \centering
   \begin{tabular}{|r|c|c|c|c|c|}
@@ -44,6 +67,8 @@ With the fastest configuration tested, the system achieves only around 14.3 fps.
   \caption{Evaluation results for different scenes averaged over all performed evaluations. Evaluation metrics have been calculates as in \cref{fig:eval-results}.}
   \label{fig:eval-by-scene}
 \end{table*}
+
+% TODO add result of the impact of the skeletal constraints and the learned components.
 
 \begin{figure*}[ht!]
   \centering
@@ -91,7 +116,18 @@ Finally, \cref{fig:eval-by-scene} shows the average performance per scene across
 
 \subsection{Qualitative Results} \label{qual}
 
-Some qualitative evaluation has also been performed for this project. The results of the system on the tests sequences has been visualized and a number of common issues have been identified. Some examples of these failure modes are shown in \cref{fig:qual}.
+Some qualitative evaluation has also been performed for this project.
+
+\subsubsection{Impact of the Skeletal Constraints}
+
+% TODO add another figure with SALSA
+% TODO add another figure with Covision data
+% TODO talk about impact of the skeletal constraints
+
+\subsubsection{Common Failure Modes}
+
+% TODO mention that some if the failure modes are solved by the skeletal constraints
+The results of the system on the tests sequences has been visualized and a number of common issues have been identified. Some examples of these failure modes are shown in \cref{fig:qual}.
 
 \paragraph{Partially Occluded Person}
 One very common failure mode is depicted in \cref{fig:qual-occlusion}. When a person is partially occluded in all camera views, then the position of the unobserved keypoints tends to shift in unnatural ways, as can be seen with the legs keypoints in the given example. This problem is made worse by the fact that the YOLO model tend to predict invisible keypoints in unnatural positions, and while their visibility score is low, it can still commutatively have a significant effect over multiple frames. This issue causes increased joint position errors.
@@ -99,6 +135,7 @@ One very common failure mode is depicted in \cref{fig:qual-occlusion}. When a pe
 \paragraph{Inactive Track Seen by Only One Camera}
 Another commonly observed failure is shown in \cref{fig:qual-single}. When a person first enters the room, typically only one camera can see them. This means that it is not possible to create a new track for that person. This causes false positives, and therefore reduced MOTA and Recall, whenever a person enters the room.
 
+% TODO mention that this is less of a problem with the skeletal constraints
 \paragraph{Active Track Seen by Only One Camera}
 \Cref{fig:qual-single2} shows another issue that can occur when only a single camera is able to see a given person. In this case, the track has already been initialized, but the person has moved into a location where they are no longer seen by two cameras. In this case the depth coordinate from the camera can drift as the person moves, causing distorted skeletons before and behind the actual ground truth.
 

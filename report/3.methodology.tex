@@ -3,23 +3,19 @@
 
 \section{Methodology} \label{methodology}
 
-This section of the report will detail the architectures of the tracking system developed in the project.
+This section of the report will go into detail about the internal implementation of the tracking system.
 
 
-\subsection{System Architecture} \label{arch}
+\subsection{Architecture Overview} \label{arch-overview} \label{arch}
 
-This subsection will go into detail about the internal implementation of the tracking system. \Cref{fig:architecture} show the overall pipeline used in this projects tracking algorithm.
-
-
-\subsubsection{Overview} \label{arch-overview}
-
-The core of the tracking pipeline runs a recursive estimation loop on incoming multi-view video frames. The input to the system is a number of synchronized multi-view video feeds, and the final result is a 3D representation of the skeletal joint of each person in the scene.
+\Cref{fig:architecture} show the overall pipeline used in this projects tracking algorithm. The core of the tracking pipeline runs a recursive estimation loop on incoming multi-view video frames. The input to the system is a number of synchronized multi-view video feeds, and the final result is a 3D representation of the skeletal joint of each person in the scene.
 
 First, multi-view videos are passed through the YOLO detection network, yielding 2D bounding boxes and keypoints. Concurrently, the tracking module predicts the current 3D state of all previously known tracks based on continuous physics models. The keypoints of the predicted tracks are projected into the 2D camera planes and matched against the newly observed 2D detections. Detections matched to existing tracks trigger an extended Kalman filer update for the matched track to refine its 3D state. Unmatched, novel 2D detections matched between views, and if at least two views contain the new target, triangulated to instantiate new 3D tracks. Finally, updated tracks and newly created tracks are merged, and the loop repeats for the next timestamp.
 
 
-\subsubsection{2D Detections and Uncertainty Estimation} \label{arch-detect}
+\subsection{2D Detections and Uncertainty Estimation} \label{arch-detect}
 
+% TODO explain that the computation of sigma here is the non-learned version
 During inference, images from each active camera view are batched and passed to the YOLO26-pose detector using PyTorch \parencite{paszke2019pytorch,ansel2024pytorch}. The detector outputs 2D keypoint positions along with visibility confidence scores $c_k \in [0, 1]$. As a first filter we select only detections that have a confidence above $\tau_{obj}$. Further, we filter out any detections for which fewer than $N_{kpt}$ are visible with a confidence above $\tau_{kpt}$. However, for performing the Kalman filter updates we need a probabilistic framework in which we model the prediction uncertainty as Gaussian noise. This need can not be satisfied by the confidence score alone. To estimate the measurement noise covariance dynamically from the outputs of the YOLO model, the system relies on bounding box and visibility scaling. The variance $\sigma_k^2$ for each detected keypoint $k$ is computed dynamically based on the bounding box magnitude and the joint visibility confidence. The specific formulation used is:
 \begin{align*}
     \sigma_k^2 &= \sigma_{min}^2 + d_{bb}^2 \cdot \left( \frac{\sigma_{vis}^2}{\max(0, \bar{c}_k) + \frac{\sigma_{vis}^2}{\sigma_{inv}^2}} \right)
@@ -37,14 +33,16 @@ To maintain consistent uncertainty representation, we also transform the observa
 The main motivation behind this approach is that it simplifies the triangulation for new tracks as well as the observation process modeling in the Kalman filter update for old tracks by removing the non-linear distortion effects. As an additional benefit, it becomes more efficient to compute not only the Kalman filter updates but also the computation of cost matrices for the association step, which need to perform projection from the internal 3D state.
 
 
-\subsubsection{State Representation and Kalman Filtering} \label{arch-filter}
+\subsection{State Representation and Kalman Filtering} \label{arch-filter}
 
+% TODO explain that the representation here is the one without constraints or learning
 In the Kalman filter implementation of the project, the state for each person is tracked separately. The state vector is composed by modeling the human pose as a collection of 17 keypoints. The state vector $\mathbf{x} \in \mathbb{R}^{102}$ encapsulates the 3D coordinates and the 3D velocities for all 17 keypoints resulting in a state vector shaped as:
 \begin{align*}
     \mathbf{x} &= \begin{bmatrix} \mathbf{p}_1^T, \; \dots, \; \mathbf{p}_{17}^T, \; \mathbf{v}_1^T, \; \dots, \; \mathbf{v}_{17}^T \end{bmatrix}^T
 \end{align*}
 where $\mathbf{p}_k = [x_k, y_k, z_k]^T \in \mathbb{R}^3$ and $\mathbf{v}_k = [\dot{x}_k, \dot{y}_k, \dot{z}_k]^T \in \mathbb{R}^3$ are the 3D position and velocity vectors for keypoint $k$.
 
+% TODO explain that the dynamics here are the ones without constraints or learning
 The state dynamics are modeled by a continuous-time linear velocity process. The decision was made to specify the dynamics in the continuous domain in order to be able to handle variable frame rates which could for example arise due to frames being dropped during computationally more demanding scenes. The continuous dynamics matrix $\mathbf{F}$ and process noise $\mathbf{Q}$ are mapped to discrete time steps $\Delta t_i$ dynamically for each frame $i$ using a second-order Taylor expansion based approximation:
 \begin{align*}
     \mathbf{F}_k &\approx \mathbf{I} + \mathbf{F} \Delta t_i + \frac{1}{2} \mathbf{F}^2 \Delta t_i^2 \\
@@ -69,7 +67,7 @@ This formulation can handle asynchronous data naturally by simply omitting camer
 Because the projection mapping is non-linear, the extended Kalman filter requires the computation of the Jacobian $\mathbf{H}_i \in \mathbb{R}^{34M \times 102}$. Rather than deriving and hard-coding this computation analytically, the system leverages the automatic differentiation capabilities of PyTorch \parencite{paszke2019pytorch,ansel2024pytorch} to compute the exact measurement Jacobian dynamically at runtime.
 
 
-\subsubsection{Data Association} \label{arch-assoc}
+\subsection{Data Association} \label{arch-assoc}
 
 Data association is performed in two separate steps. First, the detections for in view are matched against the existing 3D track predictions. This is performed independently for each view. Next, all detections that were not matched to any of the existing tracks must be matched between views in order to find opportunities for triangulation.
 
@@ -87,23 +85,28 @@ Detections that are not matched to existing tracks by the above method may belon
 where $\mathbf{X}_{3D}$ is the triangulated 3D point from the $K$ associated views, and $\theta_{mn}$ is the new-track association threshold. Detections matched in at least two views are grouped to initialize a new track via triangulation.
 
 
-\subsubsection{Track Creation and Deletion} \label{arch-tracks}
+\subsection{Track Creation and Deletion} \label{arch-tracks}
 
 To prevent spurious detections from creating false tracks, we manage the lifecycle of each track using a state machine. New tracks that have just been added via triangulation of detections start out as tentative tracks.  If a tentative track is not matched to at least one detection in the next frame, it is deleted immediately. Once a tentative track have been observed for $\ge N_{age}$ consecutive frames, it is promoted to an active tracks. Active tracks are more robust to occasional missing detections. If an active track is not observed, its state is updated only using the Kalman filter prediction step. However, if it remains unmatched for more than $N_{inv}$ consecutive frames, it is deleted.
 
-\begin{table*}[!ht]
-  \centering
-  \begin{tabular}{|r|r|c|c|c|c|c|c|c|}
-  \hline
-    Model & \# Cameras & Detection & Matching & EKF Update & EKF Prediction & Total \\ \hline
-    \multirow{4}{*}{YOLO26n-pose}  & 4 & 0.0445 & 0.0166 & 0.0080 & 0.0005 & 0.0697 \\ \cline{2-7}
-      & 8 & 0.0840 & 0.0313 & 0.0127 & 0.0006 & 0.1288 \\ \cline{2-7}
-      & 12 & 0.1324 & 0.0431 & 0.0165 & 0.0006 & 0.1929 \\ \cline{2-7}
-      & 16 & 0.1805 & 0.0567  & 0.0210 & 0.0007 & 0.2592 \\ \hline \hline
-    YOLO26s-pose & 4 & 0.0876 & 0.0178 & 0.0083 & 0.0005 & 0.1145 \\ \hline
-    YOLO26m-pose & 4 & 0.2519 & 0.0177 & 0.0083 & 0.0005 & 0.2786 \\ \hline
-    YOLO26l-pose & 4 & 0.2613 & 0.0177 & 0.0083 & 0.0005 & 0.2879 \\ \hline
-  \end{tabular}
-  \caption{Average per-frame runtime of the tracking system for different camera and model configurations. Times are given in seconds.}
-  \label{fig:perf}
-\end{table*}
+
+\subsection{Skeletal Constraints} \label{arch-constraints}
+
+% TODO
+
+
+\subsection{Learning Parameters from Data} \label{arch-learning}
+
+% TODO
+
+\subsubsection{Custom YOLO Output Head}
+
+% TODO
+
+\subsubsection{Learning the Kalman Filter}
+
+% TODO
+
+\subsubsection{Tuning Other Parameters}
+
+% TODO
