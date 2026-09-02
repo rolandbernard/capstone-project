@@ -230,7 +230,7 @@ def compute_loss_base(pred: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thre
         + w_mse * torch.mean(torch.sum(diff*diff, dim=(-1, -2)) * w)
 
 
-def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float = 0.0, eps=1e-5):
+def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float = 0.05):
     """
     Compute the loss between the predictions and the ground truth. First, match
     the detections against the known ground truth and then compute the negative
@@ -254,16 +254,17 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float =
             - b_gt[:, :, :2].unsqueeze(0)
         dist_matrix *= dist_matrix
         weight = torch.sigmoid(b_kpts[:, :, 2]).unsqueeze(1) \
-            * b_gt[:, :, 2].unsqueeze(0)
+            * b_gt[:, :, 2].clamp(0.0, 1.0).unsqueeze(0)
         cost_matrix = torch.sum(torch.sum(dist_matrix, dim=-1) * weight, dim=-1) \
-            / (torch.sum(weight, dim=-1) + eps)
+            / (torch.sum(weight, dim=-1).clamp(3.0) + 1e-5)
         # Hungarian Matching (Push to CPU only for the solver)
         cost_np = cost_matrix.detach().cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
-        matched_pred_indices = valid_idx[row_idx]
+        valid_match = dist_matrix[row_idx, col_idx] < 30.0
+        matched_pred_indices = valid_idx[row_idx[valid_match]]
         preds.append(
             pred["kpts_extra"][b, :, matched_pred_indices].view(17, 5, -1).permute(2, 0, 1))
-        gts.append(b_gt[col_idx])
+        gts.append(b_gt[col_idx[valid_match]])
     if len(preds) == 0:
         return torch.tensor(0.0, device=gt.device, requires_grad=True)
     return compute_loss_base(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse)
@@ -338,7 +339,7 @@ def train_epochs(nets: NetStorage, train, val, num_epochs: int, w_mse: float, ca
         print("max epoch reached")
 
 
-def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=1.0, testing=False, callback=None):
+def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None, model, w_mse=0.1, testing=False, callback=None):
     """
     Perform multiple training epochs. This will initialize the net storage in
     case we are starting a fresh run, and resume the existing run otherwise. The

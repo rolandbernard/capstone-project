@@ -329,10 +329,10 @@ class Camera:
         raise KeyError
 
 
-def inv_sqrt_sym(matrix: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+def inv_sqrt_sym(matrix: torch.Tensor) -> torch.Tensor:
     """ Compute the inverse square-root of the given batch of matrices. """
     diag, vecs = torch.linalg.eigh(matrix)
-    inv_sqrt = 1.0 / (torch.sqrt(diag) + eps)
+    inv_sqrt = 1.0 / (torch.sqrt(diag) + 1e-7)
     return vecs @ torch.diag_embed(inv_sqrt) @ vecs.mT
 
 
