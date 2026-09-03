@@ -421,6 +421,21 @@ class CmuPanopticDataset:
                         self.extract_scene_kalman_dataset(
                             scene, f"{path}/train", min_len, use_hd)
 
+    def extract_tune_dataset(self, path: str = "./data/tune", check_time=25*25, out_len=30*25):
+        """
+        Determine in the dataset those training scenes in which in the first 25
+        seconds there are at least 3 people. These are used for tuning parameters.
+        Also store the first 30 seconds of annotations.
+        """
+        os.makedirs(path, exist_ok=True)
+        for scene in self.scenes:
+            if scene not in self.test_scenes and self.is_valid_scene(scene):
+                ann_path = f"{self.path}/{scene}/vgaPose3d_stage1_coco19"
+                frames = self.load_ground_truth_annotation(ann_path)[:out_len]
+                if len(frames[check_time]) >= 3:
+                    with open(f"{path}/{scene}.json", "w") as f:
+                        json.dump(frames, f)
+
 
 class YoloDataset(Dataset):
     """

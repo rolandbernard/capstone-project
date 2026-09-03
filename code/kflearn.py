@@ -107,8 +107,8 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
     total_loss = 0
     count = 0
     for fps, track in loader:
-        fps = fps.to(model.device, non_blocking=True)
-        track = track.to(model.device, non_blocking=True)
+        fps = fps.to(model.device, dtype=torch.float64, non_blocking=True)
+        track = track.to(model.device, dtype=torch.float64, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
         pred0, _, pred1, _ = simulate_kalman_filter(model, fps, track)
         loss = compute_loss(pred0, track) + compute_loss(pred1, track)
@@ -154,10 +154,17 @@ def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, callba
     storage.
     """
     model = nets.net
-    optimizer = nets.optimizer
+    optimizer: torch.optim.Adam = nets.optimizer
+    for _, state in optimizer.state.items():
+        for key, value in state.items():
+            if torch.is_tensor(value):
+                state[key] = value.to(torch.float64)
     scheduler = nets.scheduler
     for epoch in range(nets.step + 1, num_epochs):
+        # Train in 64bit for better stability
+        model.to(dtype=torch.float64)
         tr_loss = train_epoch(model, train, raw_data, optimizer)
+        model.to(dtype=torch.float32)
         val_loss = eval_epoch(model, val, raw_data)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,
@@ -179,7 +186,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE), 1e-5)
+    nets = util.net_storage_in(nets_dir, stat_dir, model, 1e-4)
     raw_data = dataset.CmuPanopticDataset(
         f"{os.path.dirname(__file__)}/data/panoptic")
     full_train = dataset.KalmanDataset(

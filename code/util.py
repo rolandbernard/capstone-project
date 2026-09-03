@@ -141,7 +141,7 @@ def net_storage_in(nets_dir: str | None, stat_dir: str | None, model, lr, compil
     """
     optimizer = optim.Adam(model.train_parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-7)
+        optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6)
     return NetStorage(nets_dir, stat_dir, model, optimizer, scheduler, compile)
 
 
