@@ -298,8 +298,9 @@ class Camera:
         *_, M = covars.shape
         intr = torch.kron(
             torch.eye(M // 2, device=covars.device), self.intrinsic[0:2, 0:2])
-        covars = torch.linalg.solve(intr, covars.mT).mT
-        covars = torch.linalg.solve(intr, covars)
+        LU, pivots = torch.linalg.lu_factor(intr)
+        covars = torch.linalg.lu_solve(LU, pivots, covars.mT).mT
+        covars = torch.linalg.lu_solve(LU, pivots, covars)
         return covars
 
     def to(self, *args, **kargs):

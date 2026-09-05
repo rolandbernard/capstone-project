@@ -164,8 +164,9 @@ class Tracker:
         for j in range(num_detect):
             dist = (kpts[j] - pred_kpts).unsqueeze(-1)
             total_cov = covs[j] + pred_covar
-            dist = (dist.mT @ torch.linalg.solve(total_cov, dist)).flatten()
-            _, logdet = torch.linalg.slogdet(total_cov)
+            L = torch.linalg.cholesky(total_cov)
+            dist = (dist.mT @ torch.cholesky_solve(dist, L)).flatten()
+            logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
             cost_matrix[:num_track, j] = dist + logdet \
                 - num_dim*self.mo_threshold
         # Run Hungarian matching.
@@ -196,16 +197,16 @@ class Tracker:
             # Build cost matrix.
             cost_matrix = torch.zeros(
                 (num_track + num_detect, num_detect), device=kpts.device)
-            cam_2 = cams[c_idx]
+            cam2 = cams[c_idx]
             for t_idx, track in enumerate(active_tracks):
                 # Collect all camera views and points for this track.
-                m_cams, m_kpts, m_covs = [cam_2], [kpts], [covs]
+                m_cams, m_kpts, m_covs = [cam2], [kpts], [covs]
                 for past_c, past_d in track.items():
-                    kpt_1 = detections[past_c][0][past_d]
-                    cov_1 = detections[past_c][1][past_d]
+                    kpt1 = detections[past_c][0][past_d]
+                    cov1 = detections[past_c][1][past_d]
                     m_cams.append(cams[past_c])
-                    m_kpts.append(kpt_1.expand(num_detect, num_dim))
-                    m_covs.append(cov_1.expand(num_detect, num_dim, num_dim))
+                    m_kpts.append(kpt1.expand(num_detect, num_dim))
+                    m_covs.append(cov1.expand(num_detect, num_dim, num_dim))
                 # Triangulate using all camera views at once.
                 mean3d = camera.triangulate_undistorted(
                     m_cams,
@@ -213,28 +214,29 @@ class Tracker:
                     [util.per_point_cov(c, 2) for c in m_covs]
                 )
                 # Compute cost for reprojection into new camera view.
-                pred_2 = cam_2.project_pinhole(mean3d) \
+                pred2 = cam2.project_pinhole(mean3d) \
                     .view(num_detect, num_dim)
-                diff2 = (kpts - pred_2).unsqueeze(-1)
-                dist2 = (diff2.mT @ torch.linalg.solve(covs, diff2)).flatten()
-                _, logdet_2 = torch.linalg.slogdet(covs)
-                cost_sum = dist2 + logdet_2
+                diff2 = (kpts - pred2).unsqueeze(-1)
+                L = torch.linalg.cholesky(covs)
+                dist2 = (diff2.mT @ torch.cholesky_solve(diff2, L)).flatten()
+                logdet2 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
+                cost_sum = dist2 + logdet2
                 # Compute cost for reprojection into all prev camera view.
                 for past_c, past_d in track.items():
-                    kpt_1 = detections[past_c][0][past_d]
-                    cov_1 = detections[past_c][1][past_d]
-                    pred_1 = cams[past_c].project_pinhole(mean3d)\
+                    kpt1 = detections[past_c][0][past_d]
+                    cov1 = detections[past_c][1][past_d]
+                    pred1 = cams[past_c].project_pinhole(mean3d)\
                         .view(num_detect, num_dim)
-                    diff1 = (kpt_1.expand(num_detect, num_dim) - pred_1) \
+                    diff1 = (kpt1.expand(num_detect, num_dim) - pred1) \
                         .unsqueeze(-1)
-                    dist1 = (diff1.mT @ torch.linalg.solve(cov_1, diff1)) \
+                    L = torch.linalg.cholesky(cov1)
+                    dist1 = (diff1.mT @ torch.cholesky_solve(diff1, L)) \
                         .flatten()
-                    _, logdet_1 = torch.linalg.slogdet(cov_1)
-                    cost_sum += dist1 + logdet_1
+                    logdet1 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
+                    cost_sum += dist1 + logdet1
                 # Average cost over all reprojections.
-                avg_cost = (cost_sum / (len(track) + 1)) \
+                cost_matrix[t_idx, :] = (cost_sum / (len(track) + 1)) \
                     - (num_dim * self.mn_threshold)
-                cost_matrix[t_idx, :] = avg_cost
             # Run Hungarian matching.
             cost_np = cost_matrix.detach().cpu().numpy()
             tr_idx, det_idx = scipy.optimize.linear_sum_assignment(cost_np)
@@ -371,8 +373,9 @@ class Tracker:
                         print(f"finished frame {i}")
         except KeyboardInterrupt:
             # We want to stop, but let's still return the results so the time
-            # was not wasted. (Allows for early stop.)
-            pass
+            # was not wasted. (Allows for early stop. Only if using progress.)
+            if progress == 0:
+                raise
         finally:
             source.release()
         return last_cams, frames, 1/dt
@@ -419,9 +422,10 @@ class CrossViewFirstTracker(Tracker):
                         kpts, covs = det[0][m], det[1][m]
                         dist = (kpts - a_pred_kpts[i]).unsqueeze(-1)
                         total_cov = covs + a_pred_covar[i]
+                        L = torch.linalg.cholesky(total_cov)
                         dist = (
-                            dist.mT @ torch.linalg.solve(total_cov, dist)).flatten()
-                        _, logdet = torch.linalg.slogdet(total_cov)
+                            dist.mT @ torch.cholesky_solve(dist, L)).flatten()
+                        logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
                         cost_matrix[:num_track, j] += dist + logdet \
                             - num_dim*self.mo_threshold
                         count += 1

@@ -345,8 +345,9 @@ def update_res(
             (obs_mat[..., :K*D, :] @ cov @ obs_mat[..., :K*D, :].mT
              + obs_cov[..., :K*D, :K*D]), D)
         res = obs_res[..., :K*D].view(*Bs, K, D, 1)
+        L = torch.linalg.cholesky(inov)
         d = torch.sqrt(
-            (res.mT @ torch.linalg.solve(inov, res)).view(*Bs, -1) + 1e-8)
+            (res.mT @ torch.cholesky_solve(res, L)).view(*Bs, -1) + 1e-8)
         weight = torch.concat([
             torch.where(d <= 2.0, torch.ones_like(d), d / 2.0)
             .repeat_interleave(2, dim=-1),
@@ -354,7 +355,15 @@ def update_res(
         ], dim=-1)
         obs_cov = obs_cov * weight * weight.unsqueeze(-1)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
-    gain = torch.linalg.solve(inov, obs_mat @ cov).mT
+    try:
+        L = torch.linalg.cholesky(inov)
+        gain = torch.cholesky_solve(obs_mat @ cov, L).mT
+    except:
+        # This can happen if the state is messed up. Try not to mess it up more.
+        # Typically this will resolve itself once we dilute with process noise
+        # and we get better observations.
+        print("warning: innovation covariance is not SPD")
+        gain = torch.zeros_like(obs_mat.mT)
     return (
         mean + (gain @ obs_res.unsqueeze(-1)).squeeze(-1),
         (torch.eye(N, device=gain.device) - gain @ obs_mat) @ cov
