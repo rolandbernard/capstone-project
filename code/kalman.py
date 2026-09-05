@@ -72,7 +72,7 @@ class ConstrainedPhysics(LinearPhysics):
     def compute_keypoints(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the augmented points on which constraints are defined. """
         *Bs, _ = x.shape
-        points = x[:self.num_keypoint*3].view(*Bs, -1, 3)
+        points = x[..., :self.num_keypoint*3].view(*Bs, -1, 3)
         return torch.concat([
             points,
             (points[..., self.point_mix[0], :]
@@ -131,10 +131,10 @@ class WalledPhysics(ConstrainedPhysics):
     def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the constraint violation. """
         *Bs, _ = x.shape
-        points = x[:self.num_keypoint*3].view(*Bs, -1, 3)
-        w_dist = ((points.view(*Bs, -1, 1, 3) - self.wall_centers.view(*Bs, 1, -1, 3))
-                  .view(*Bs, -1, 1, 1, 3) @ self.wall_norm.view(*Bs, 1, -1, 3, 1)) \
-            .squeeze(-1).squeeze(-1)
+        points = x[..., :self.num_keypoint*3].view(*Bs, -1, 3)
+        w_dist = ((points.view(*Bs, -1, 1, 3) - self.wall_centers.view(1, -1, 3))
+                  .view(*Bs, -1, 1, 3) @ self.wall_norm.view(-1, 3, 1)) \
+            .squeeze(-1)
         return torch.concat([
             super().pseudo_obs(x),
             torch.nn.functional.relu(-w_dist.view(*Bs, -1)),
@@ -224,12 +224,6 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         """ Wrap a tensor in a PyTorch parameter node. """
         x.requires_grad = True
         return nn.Parameter(x)
-
-    def compute_distances(self, x: torch.Tensor) -> torch.Tensor:
-        """ Compute the constrained distances. """
-        *Bs, _ = x.shape
-        return torch.linalg.vector_norm(
-            (self.constraints[0:3] @ x.view(*Bs, 1, -1, 1)).view(*Bs, 3, -1), dim=-2)
 
     def pseudo_obs(self, x: torch.Tensor) -> torch.Tensor:
         """ Compute the constraint violation. """

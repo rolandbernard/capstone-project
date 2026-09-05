@@ -33,7 +33,8 @@ class Track:
     def moved(self, mean: torch.Tensor, cov: torch.Tensor):
         """ Update the track to the new state (from a prediction). """
         self.mean = mean
-        self.cov = cov
+        # Force symmetry which can be lost over time due to rounding errors.
+        self.cov = 0.5 * (cov + cov.mT)
         # Uncomment this as an extra assertion when debugging.
         # util.check_covariance(cov)
 
@@ -264,7 +265,7 @@ class Tracker:
 
     def update_track(self, track: Track, cams: list[Camera], kpts: list[torch.Tensor], covs: list[torch.Tensor]):
         """ Update the given track with detections in multiple camera views. """
-        ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[:self.num_keypoint*3].view(-1, 3)).flatten()
+        ob_fs = [lambda x, cam=cam: cam.project_pinhole(x[..., :self.num_keypoint*3].view(-1, 3)).flatten()
                  for cam in cams]
         ob_ms = [mean for mean in kpts]
         ob_vs = [cov * self.physics.obs_cov_scale for cov in covs]
