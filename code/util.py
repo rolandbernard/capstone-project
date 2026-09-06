@@ -282,12 +282,18 @@ def per_point_cov(covar: torch.Tensor, num_dim: int = 3) -> torch.Tensor:
     return blocks.permute(0, 3, 1, 2).view(*Bs, -1, num_dim, num_dim)
 
 
-def sanitize_covariance(cov: torch.Tensor, floor: float = 1e-6) -> torch.Tensor:
-    """ Forces symmetry and projects back onto the positive-definite cone. """
-    sym_cov = 0.5 * (cov + cov.mT)
-    eigs, vecs = torch.linalg.eigh(sym_cov)
-    eigs = torch.clamp(eigs, min=floor)
-    return vecs @ torch.diag_embed(eigs) @ vecs.mT
+def symmetrize(cov: torch.Tensor) -> torch.Tensor:
+    """ Symmetrize the given covariance matrix to counteract errors. """
+    return 0.5 * (cov + cov.mT)
+
+
+def sanitize_covariance(cov: torch.Tensor) -> torch.Tensor:
+    """ Forces symmetry and ensure SPD by adding jitter. """
+    cov = symmetrize(cov)
+    # Make this relative because that determines the conditioning.
+    max_diag = cov.diagonal(0, -1, -2).max(-1).values.clamp(1)
+    eps = max_diag.unsqueeze(-1).unsqueeze(-1) * 1e-6
+    return cov + (torch.eye(cov.shape[-1], device=cov.device) * eps)
 
 
 def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix"):

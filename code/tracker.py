@@ -34,7 +34,7 @@ class Track:
         """ Update the track to the new state (from a prediction). """
         self.mean = mean
         # Force symmetry which can be lost over time due to rounding errors.
-        self.cov = 0.5 * (cov + cov.mT)
+        self.cov = util.sanitize_covariance(cov)
         # Uncomment this as an extra assertion when debugging.
         # util.check_covariance(cov)
 
@@ -158,13 +158,14 @@ class Tracker:
             lambda x: cam.project_pinhole(x.view(-1, 3)).view(-1, self.num_keypoint*2), pred_means)
         pred_covar = torch.stack([track.cov[:self.num_keypoint*3, :self.num_keypoint*3]
                                  for track in self.tracks])
-        pred_covar = pred_jacs @ pred_covar @ pred_jacs.mT
+        pred2d_covar = util.sanitize_covariance(
+            pred_jacs @ pred_covar @ pred_jacs.mT)
         # Build cost matrix.
         cost_matrix = torch.zeros(
             (num_track + num_detect, num_detect), device=kpts.device)
         for j in range(num_detect):
             dist = (kpts[j] - pred_kpts).unsqueeze(-1)
-            total_cov = covs[j] + pred_covar
+            total_cov = covs[j] + pred2d_covar
             L = torch.linalg.cholesky(total_cov)
             dist = (dist.mT @ torch.cholesky_solve(dist, L)).flatten()
             logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
