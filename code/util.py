@@ -366,3 +366,13 @@ def check_covariance(cov: torch.Tensor, label: str | None = None):
             print(label)
         diagnose_covariance(cov)
         torch.linalg.cholesky(cov)
+
+
+def mahalanobis(L: torch.Tensor, diff: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the squared Mahalanobis distance from difference and Cholesky factor
+    of the combined covariance matrix.
+    """
+    v: torch.Tensor = torch.linalg.solve_triangular(
+        L, diff.unsqueeze(-1), upper=False)
+    return (v.mT @ v).flatten(-3, -1)

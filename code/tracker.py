@@ -164,10 +164,9 @@ class Tracker:
         cost_matrix = torch.zeros(
             (num_track + num_detect, num_detect), device=kpts.device)
         for j in range(num_detect):
-            dist = (kpts[j] - pred_kpts).unsqueeze(-1)
             total_cov = covs[j] + pred2d_covar
             L = util.safe_cholesky(total_cov)
-            dist = (dist.mT @ torch.cholesky_solve(dist, L)).flatten()
+            dist = util.mahalanobis(L, kpts[j] - pred_kpts)
             logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
             cost_matrix[:num_track, j] = dist + logdet \
                 - num_dim*self.mo_threshold
@@ -218,9 +217,8 @@ class Tracker:
                 # Compute cost for reprojection into new camera view.
                 pred2 = cam2.project_pinhole(mean3d) \
                     .view(num_detect, num_dim)
-                diff2 = (kpts - pred2).unsqueeze(-1)
                 L = util.safe_cholesky(covs)
-                dist2 = (diff2.mT @ torch.cholesky_solve(diff2, L)).flatten()
+                dist2 = util.mahalanobis(L, kpts - pred2)
                 logdet2 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
                 cost_sum = dist2 + logdet2
                 # Compute cost for reprojection into all prev camera view.
@@ -229,11 +227,9 @@ class Tracker:
                     cov1 = detections[past_c][1][past_d]
                     pred1 = cams[past_c].project_pinhole(mean3d)\
                         .view(num_detect, num_dim)
-                    diff1 = (kpt1.expand(num_detect, num_dim) - pred1) \
-                        .unsqueeze(-1)
                     L = util.safe_cholesky(cov1)
-                    dist1 = (diff1.mT @ torch.cholesky_solve(diff1, L)) \
-                        .flatten()
+                    diff1 = kpt1.expand(num_detect, num_dim) - pred1
+                    dist1 = util.mahalanobis(L, diff1)
                     logdet1 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
                     cost_sum += dist1 + logdet1
                 # Average cost over all reprojections.
@@ -422,11 +418,9 @@ class CrossViewFirstTracker(Tracker):
                 for i, (cam, m, det) in enumerate(zip(cams, match, detections)):
                     if m.item() != -1:
                         kpts, covs = det[0][m], det[1][m]
-                        dist = (kpts - a_pred_kpts[i]).unsqueeze(-1)
                         total_cov = covs + a_pred_covar[i]
                         L = util.safe_cholesky(total_cov)
-                        dist = (
-                            dist.mT @ torch.cholesky_solve(dist, L)).flatten()
+                        dist = util.mahalanobis(L, kpts - a_pred_kpts[i])
                         logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
                         cost_matrix[:num_track, j] += dist + logdet \
                             - num_dim*self.mo_threshold

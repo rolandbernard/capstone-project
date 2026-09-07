@@ -222,12 +222,10 @@ def compute_loss_base(pred: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thre
         torch.stack([c, b], dim=-1)
     ], dim=-2)
     logdet = 2.0 * (torch.log(a) + torch.log(b))
-    diff = (gt_xy - mu).unsqueeze(-1)
-    v = torch.linalg.solve_triangular(L, diff, upper=False)
-    mahalanobis = v.mT @ v
-    nll = logdet + mahalanobis
+    diff = gt_xy - mu
+    nll = logdet + util.mahalanobis(L, diff)
     return torch.mean(nll * w) \
-        + w_mse * torch.mean(torch.sum(diff*diff, dim=(-1, -2)) * w)
+        + w_mse * torch.mean(torch.sum(diff*diff, dim=-1) * w)
 
 
 def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float = 0.05):

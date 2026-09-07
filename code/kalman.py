@@ -158,7 +158,7 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
     one assumes all covariances are diagonal matrices for easier parameterization.
     """
 
-    def __init__(self, init: ConstrainedPhysics, random=False):
+    def __init__(self, init: ConstrainedPhysics, random=False, bias=False):
         nn.Module.__init__(self)
         self.num_keypoint = init.num_keypoint
         self.get_dyn = lru_cache()(self._get_dyn)
@@ -186,6 +186,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
             self.constr_cov_diag = self.as_parameter(
                 init.constr_cov.diag().sqrt())
             self.constr_val = self.as_parameter(init.constr_val)
+        if bias:
+            self.bias = self.as_parameter(torch.zeros_like(init.init_mean))
         self.obs_cov_scale = self.as_parameter(
             torch.tensor(init.obs_cov_scale))
 
@@ -233,6 +235,17 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         dist = torch.sqrt(sum_sq + 1e-3)
         return dist - values[..., 3, :]
 
+    def predict(self, dt: float, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply the internal prediction logic from this Kalman filter for the given
+        amount of time having passed and return the new means and covariances for
+        the targets.
+        """
+        dyn_mat, dyn_cov = self.get_dyn(dt)
+        if self.bias is not None:
+            mean = mean + dt * self.bias
+        return predict(mean, cov, dyn_mat, dyn_cov)
+
     def predict_train(self, dt: torch.Tensor, mean: torch.Tensor, cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply the internal prediction logic for training. This differs from
@@ -240,6 +253,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
         different time step per batch.
         """
         dyn_mat, dyn_cov = multi_discretize(dt, self.dyn_mat, self.dyn_cov)
+        if self.bias is not None:
+            mean = mean + dt.unsqueeze(-1) * self.bias
         return predict(mean, cov, dyn_mat, dyn_cov)
 
     def train_parameters(self):
@@ -341,10 +356,9 @@ def update_res(
         inov = util.per_point_cov(
             (obs_mat[..., :K*D, :] @ cov @ obs_mat[..., :K*D, :].mT
              + obs_cov[..., :K*D, :K*D]), D)
-        res = obs_res[..., :K*D].view(*Bs, K, D, 1)
+        res = obs_res[..., :K*D].view(*Bs, K, D)
         L = util.safe_cholesky(inov)
-        d = torch.sqrt(
-            (res.mT @ torch.cholesky_solve(res, L)).view(*Bs, -1) + 1e-8)
+        d = torch.sqrt(util.mahalanobis(L, res).view(*Bs, -1) + 1e-8)
         weight = torch.concat([
             torch.where(d <= 2.0, torch.ones_like(d), d / 2.0)
             .repeat_interleave(2, dim=-1),

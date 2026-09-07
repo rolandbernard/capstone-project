@@ -72,6 +72,7 @@ def simulate_kalman_filter(
         if checks:
             for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
                 util.check_covariance(cov, f"step {t} elem {i} update")
+        covs = 0.5 * (covs + covs.mT)
         # Save post-update prediction.
         pred1.append(means[..., :K*D])
         covs1.append(covs[..., :K*D, :K*D])
@@ -81,6 +82,7 @@ def simulate_kalman_filter(
             if checks:
                 for i, cov in enumerate(covs.view(-1, *covs.shape[-2:])):
                     util.check_covariance(cov, f"step {t} elem {i} predict")
+            covs = 0.5 * (covs + covs.mT)
     return torch.stack(pred0, dim=-2), torch.stack(covs0, dim=-3), \
         torch.stack(pred1, dim=-2), torch.stack(covs1, dim=-3)
 
@@ -97,7 +99,7 @@ def compute_loss(pred, gt: torch.Tensor) -> torch.Tensor:
     return nn.functional.mse_loss(pred, gt_flat)
 
 
-def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> float:
+def train_epoch(model: kalman.LearnedPhysics, loader, optimizer) -> float:
     """
     Perform a single training epoch. Also computes the average training loss
     over the course of the epoch.
@@ -125,7 +127,7 @@ def train_epoch(model: kalman.LearnedPhysics, loader, raw_data, optimizer) -> fl
     return total_loss / count
 
 
-def eval_epoch(model, loader, raw_data) -> float:
+def eval_epoch(model, loader) -> float:
     """
     Run a single evaluation round over the given loader. This is intended to be
     used after each epoch to evaluate the performance on the validation set.
@@ -146,7 +148,7 @@ def eval_epoch(model, loader, raw_data) -> float:
     return total_loss / count
 
 
-def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, callback=None):
+def train_epochs(nets: NetStorage, train, val, num_epochs: int, callback=None):
     """
     Perform multiple training epochs, recoding the history of both training
     and validation loss in the given log directory. This will train using the
@@ -161,11 +163,11 @@ def train_epochs(nets: NetStorage, train, val, raw_data, num_epochs: int, callba
                 state[key] = value.to(torch.float64)
     scheduler = nets.scheduler
     for epoch in range(nets.step + 1, num_epochs):
-        # Train in 64bit for better stability
+        # Train in 64bit for better stability.
         model.to(dtype=torch.float64)
-        tr_loss = train_epoch(model, train, raw_data, optimizer)
+        tr_loss = train_epoch(model, train, optimizer)
         model.to(dtype=torch.float32)
-        val_loss = eval_epoch(model, val, raw_data)
+        val_loss = eval_epoch(model, val)
         nets.save_network(epoch, {
             "tr_loss": tr_loss, "val_loss": val_loss,
         }, model, optimizer, scheduler)
@@ -186,9 +188,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model, 1e-4)
-    raw_data = dataset.CmuPanopticDataset(
-        f"{os.path.dirname(__file__)}/data/panoptic")
+    nets = util.net_storage_in(nets_dir, stat_dir, model, 1e-3)
     full_train = dataset.KalmanDataset(
         f"{os.path.dirname(__file__)}/data/kalman/train")
     if testing:
@@ -206,5 +206,4 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     val_loader = DataLoader(
         val, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
-    train_epochs(nets, train_loader, val_loader,
-                 raw_data, num_epochs, callback)
+    train_epochs(nets, train_loader, val_loader, num_epochs, callback)
