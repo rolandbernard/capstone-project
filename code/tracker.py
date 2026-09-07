@@ -166,7 +166,7 @@ class Tracker:
         for j in range(num_detect):
             dist = (kpts[j] - pred_kpts).unsqueeze(-1)
             total_cov = covs[j] + pred2d_covar
-            L = torch.linalg.cholesky(total_cov)
+            L = util.safe_cholesky(total_cov)
             dist = (dist.mT @ torch.cholesky_solve(dist, L)).flatten()
             logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
             cost_matrix[:num_track, j] = dist + logdet \
@@ -219,7 +219,7 @@ class Tracker:
                 pred2 = cam2.project_pinhole(mean3d) \
                     .view(num_detect, num_dim)
                 diff2 = (kpts - pred2).unsqueeze(-1)
-                L = torch.linalg.cholesky(covs)
+                L = util.safe_cholesky(covs)
                 dist2 = (diff2.mT @ torch.cholesky_solve(diff2, L)).flatten()
                 logdet2 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
                 cost_sum = dist2 + logdet2
@@ -231,7 +231,7 @@ class Tracker:
                         .view(num_detect, num_dim)
                     diff1 = (kpt1.expand(num_detect, num_dim) - pred1) \
                         .unsqueeze(-1)
-                    L = torch.linalg.cholesky(cov1)
+                    L = util.safe_cholesky(cov1)
                     dist1 = (diff1.mT @ torch.cholesky_solve(diff1, L)) \
                         .flatten()
                     logdet1 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
@@ -424,7 +424,7 @@ class CrossViewFirstTracker(Tracker):
                         kpts, covs = det[0][m], det[1][m]
                         dist = (kpts - a_pred_kpts[i]).unsqueeze(-1)
                         total_cov = covs + a_pred_covar[i]
-                        L = torch.linalg.cholesky(total_cov)
+                        L = util.safe_cholesky(total_cov)
                         dist = (
                             dist.mT @ torch.cholesky_solve(dist, L)).flatten()
                         logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)

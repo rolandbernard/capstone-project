@@ -342,7 +342,7 @@ def update_res(
             (obs_mat[..., :K*D, :] @ cov @ obs_mat[..., :K*D, :].mT
              + obs_cov[..., :K*D, :K*D]), D)
         res = obs_res[..., :K*D].view(*Bs, K, D, 1)
-        L = torch.linalg.cholesky(inov)
+        L = util.safe_cholesky(inov)
         d = torch.sqrt(
             (res.mT @ torch.cholesky_solve(res, L)).view(*Bs, -1) + 1e-8)
         weight = torch.concat([
@@ -352,7 +352,7 @@ def update_res(
         ], dim=-1)
         obs_cov = obs_cov * weight * weight.unsqueeze(-1)
     inov = obs_mat @ cov @ obs_mat.mT + obs_cov
-    L = torch.linalg.cholesky(inov)
+    L = util.safe_cholesky(inov)
     gain = torch.cholesky_solve(obs_mat @ cov, L).mT
     return (
         mean + (gain @ obs_res.unsqueeze(-1)).squeeze(-1),
