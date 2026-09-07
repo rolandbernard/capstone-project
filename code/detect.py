@@ -227,8 +227,8 @@ class CustomHeadedYolo(nn.Module):
             for i, feats in enumerate(features)
         ], dim=2).view(bs, 17, 5, -1)
         pred["kpts_extra"] = torch.cat([
-            kpts.view(bs, 17, 3, -1)[..., :2, :]
-            + extra[:, :, 0:2] * self.strides,
+            (kpts.view(bs, 17, 3, -1)[..., :2, :] +
+             extra[:, :, 0:2] + self.anchors) * self.strides,
             torch.exp(extra[:, :, 2:4]) * self.strides,
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
