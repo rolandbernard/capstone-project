@@ -188,7 +188,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     passed configuration.
     """
     util.set_seed(42)
-    nets = util.net_storage_in(nets_dir, stat_dir, model, 1e-3)
+    nets = util.net_storage_in(nets_dir, stat_dir, model, 1e-4)
     full_train = dataset.KalmanDataset(
         f"{os.path.dirname(__file__)}/data/kalman/train")
     if testing:

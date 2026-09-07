@@ -466,16 +466,16 @@ def build_physics(scale=100.0) -> LinearPhysics:
     relative to meters, i.e., `scale=100` means centimeter units.
     """
     nk = 17*3
-    dyn_mat = torch.concat([
-        torch.concat([torch.zeros(nk, nk), torch.eye(nk)], dim=1),
-        torch.concat([torch.zeros(nk, nk), torch.eye(nk)*-0.2], dim=1)
+    dyn_mat = torch.cat([
+        torch.cat([torch.zeros(nk, nk), torch.eye(nk)], dim=1),
+        torch.cat([torch.zeros(nk, nk), torch.eye(nk)*-0.2], dim=1)
     ], dim=0)
-    dyn_cov = torch.diag(torch.concat([
+    dyn_cov = torch.diag(torch.cat([
         torch.full((nk,), (0.01 * scale)**2),
         torch.full((nk,), (3.0 * scale)**2),
     ]))
     init_mean = torch.zeros(nk + nk)
-    init_cov = torch.diag(torch.concat([
+    init_cov = torch.diag(torch.cat([
         torch.full((nk,), (1.0 * scale)**2),
         torch.full((nk,), (5.0 * scale)**2),
     ]))
@@ -487,20 +487,20 @@ def build_constrained_physics(scale=100.0, sym=True) -> kalman.ConstrainedPhysic
     links = util.RIGID_SKELETON
     nk, num_links = 17*3, len(links)
     num_len = max(util.RIGID_SKELETON_SYM) + 1 if sym else num_links
-    dyn_mat = torch.concat([
-        torch.concat([
+    dyn_mat = torch.cat([
+        torch.cat([
             torch.zeros(nk, nk), torch.eye(nk), torch.zeros(nk, num_len)], dim=1),
-        torch.concat([
+        torch.cat([
             torch.zeros(nk, nk), torch.eye(nk)*-0.2, torch.zeros(nk, num_len)], dim=1),
         torch.zeros(num_len, 2*nk + num_len)
     ], dim=0)
-    dyn_cov = torch.diag(torch.concat([
+    dyn_cov = torch.diag(torch.cat([
         torch.full((nk,), (0.01 * scale)**2),
         torch.full((nk,), (3.0 * scale)**2),
         torch.full((num_len,), (0.01 * scale)**2),
     ]))
     init_mean = torch.zeros(nk + nk + num_len)
-    init_cov = torch.diag(torch.concat([
+    init_cov = torch.diag(torch.cat([
         torch.full((nk,), (1.0 * scale)**2),
         torch.full((nk,), (5.0 * scale)**2),
         torch.full((num_len,), (1.0 * scale)**2),
@@ -520,20 +520,20 @@ def build_walled_physics(scale=100.0, sym=True, center=(0, 0, 0), up=(0, -1, 0))
     links = util.RIGID_SKELETON
     nkp, nk, num_links = 17, 17*3, len(links)
     num_len = max(util.RIGID_SKELETON_SYM) + 1 if sym else num_links
-    dyn_mat = torch.concat([
-        torch.concat([
+    dyn_mat = torch.cat([
+        torch.cat([
             torch.zeros(nk, nk), torch.eye(nk), torch.zeros(nk, num_len)], dim=1),
-        torch.concat([
+        torch.cat([
             torch.zeros(nk, nk), torch.eye(nk)*-0.2, torch.zeros(nk, num_len)], dim=1),
         torch.zeros(num_len, 2*nk + num_len)
     ], dim=0)
-    dyn_cov = torch.diag(torch.concat([
+    dyn_cov = torch.diag(torch.cat([
         torch.full((nk,), (0.01 * scale)**2),
         torch.full((nk,), (3.0 * scale)**2),
         torch.full((num_len,), (0.01 * scale)**2),
     ]))
     init_mean = torch.zeros(nk + nk + num_len)
-    init_cov = torch.diag(torch.concat([
+    init_cov = torch.diag(torch.cat([
         torch.full((nk,), (1.0 * scale)**2),
         torch.full((nk,), (5.0 * scale)**2),
         torch.full((num_len,), (1.0 * scale)**2),
@@ -543,7 +543,7 @@ def build_walled_physics(scale=100.0, sym=True, center=(0, 0, 0), up=(0, -1, 0))
         for k, (i, j) in enumerate(links)
     ], dtype=torch.long).T
     point_mix = torch.tensor([[5, 6], [11, 12]], dtype=torch.long).T
-    constr_cov = torch.diag(torch.concat([
+    constr_cov = torch.diag(torch.cat([
         torch.full((num_links,), (0.1 * scale)**2),
         torch.full((nkp,), (1.0 * scale)**2),
         torch.full((2,), (2.0 * scale)**2),

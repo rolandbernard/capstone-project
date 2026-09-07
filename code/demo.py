@@ -110,7 +110,7 @@ def points_from_depth(cam: Camera, depth: torch.Tensor, scale: float | torch.Ten
         torch.arange(height), torch.arange(width), indexing="ij")
     uv = cam.undistort_points(torch.stack([u, v], dim=-1))
     depth = depth.unsqueeze(-1)
-    cam3d = torch.concat([uv * depth, depth], dim=-1) * scale
+    cam3d = torch.cat([uv * depth, depth], dim=-1) * scale
     return cam.camera_to_world(cam3d)
 
 
@@ -273,7 +273,7 @@ def estimate_params_moge(
             v, u = torch.meshgrid(
                 torch.arange(height), torch.arange(width), indexing="ij")
             uv = cam.undistort_points(torch.stack([u, v], dim=-1))
-            dirs = torch.concat(
+            dirs = torch.cat(
                 [uv, torch.ones(height, width, 1)], dim=-1) @ cam.rotation
             c = torch.tensor(center, dtype=torch.float32)
             n = torch.tensor(up, dtype=torch.float32)

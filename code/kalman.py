@@ -73,7 +73,7 @@ class ConstrainedPhysics(LinearPhysics):
         """ Compute the augmented points on which constraints are defined. """
         *Bs, _ = x.shape
         points = x[..., :self.num_keypoint*3].view(*Bs, -1, 3)
-        return torch.concat([
+        return torch.cat([
             points,
             (points[..., self.point_mix[0], :]
              + points[..., self.point_mix[1], :]) * 0.5
@@ -121,7 +121,7 @@ class WalledPhysics(ConstrainedPhysics):
         self.wall_centers = wall_centers
         self.wall_norm = wall_norm
         self.feet_idx = feet_idx
-        self.constr_val = torch.concat([
+        self.constr_val = torch.cat([
             self.constr_val,
             torch.zeros(
                 num_keypoint * wall_centers.shape[0], device=dyn_mat.device),
@@ -135,7 +135,7 @@ class WalledPhysics(ConstrainedPhysics):
         w_dist = ((points.view(*Bs, -1, 1, 3) - self.wall_centers.view(1, -1, 3))
                   .view(*Bs, -1, 1, 3) @ self.wall_norm.view(-1, 3, 1)) \
             .squeeze(-1)
-        return torch.concat([
+        return torch.cat([
             super().pseudo_obs(x),
             torch.nn.functional.relu(-w_dist.view(*Bs, -1)),
             w_dist[..., self.feet_idx[0], self.feet_idx[1]].view(*Bs, -1),
@@ -308,8 +308,8 @@ def merge_obs(
     independent. This allows multiple different observations to be performed with
     a single update step.
     """
-    comb_mat = torch.concat(obs_mat, dim=-2)
-    comb_mean = torch.concat(obs_mean, dim=-1)
+    comb_mat = torch.cat(obs_mat, dim=-2)
+    comb_mean = torch.cat(obs_mean, dim=-1)
     comb_cov = batched_block_diag(obs_cov)
     return comb_mat, comb_mean, comb_cov
 
@@ -322,8 +322,8 @@ def emerge_obs(
     Kalman filters (intended for the auto-differentiating version).
     """
     def comb_obs(x):
-        return torch.concat([o(x) for o in obs], dim=-1)
-    comb_mean = torch.concat(obs_mean, dim=-1)
+        return torch.cat([o(x) for o in obs], dim=-1)
+    comb_mean = torch.cat(obs_mean, dim=-1)
     comb_cov = batched_block_diag(obs_cov)
     return comb_obs, comb_mean, comb_cov
 
@@ -359,7 +359,7 @@ def update_res(
         res = obs_res[..., :K*D].view(*Bs, K, D)
         L = util.safe_cholesky(inov)
         d = torch.sqrt(util.mahalanobis(L, res).view(*Bs, -1) + 1e-8)
-        weight = torch.concat([
+        weight = torch.cat([
             torch.where(d <= 2.0, torch.ones_like(d), d / 2.0)
             .repeat_interleave(2, dim=-1),
             torch.ones_like(obs_res[..., K*D:])

@@ -348,7 +348,7 @@ class CmuPanopticDataset:
                             b["joints19"] for b in ann["bodies"]
                         ]).view(-1, 19, 4)[:, self.coco17_indices]
                         kpts = [
-                            torch.concat([
+                            torch.cat([
                                 cam.project(joints[..., :3]),
                                 joints[..., 3:4]
                             ], dim=-1) for cam in cams]

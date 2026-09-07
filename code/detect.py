@@ -30,6 +30,7 @@ class PoseDetector:
     ):
         model: PoseModel = YOLO(
             f"{path}/{model_name}.pt").model  # type: ignore
+        model.fuse(False)
         model.eval()
         if compile:
             model.compile()
@@ -48,6 +49,7 @@ class PoseDetector:
         Basic version of the detection loop that expects the images to be already
         batched in the expected format.
         """
+        assert not self.model.training
         pred, _ = self.model(images)
         results = []
         for img_res in pred:
@@ -119,6 +121,7 @@ class CustomPoseDetector(PoseDetector):
         """
         Run the detection algorithm and return discovered keypoints.
         """
+        assert not self.model.training
         pred = self.model(images)
         valid_mask = torch.sigmoid(pred["one2one"]["scores"]) > self.threshold
         results = []
@@ -142,6 +145,23 @@ class CustomPoseDetector(PoseDetector):
         return results
 
 
+class CustomHead(nn.Module):
+    """ Output head for the custom YOLO model. """
+
+    def __init__(self, ch_in: int, ch_out: int, ch_hidden=128, depth=3):
+        super().__init__()
+        self.input = Conv(ch_in, ch_hidden, 3)
+        self.hidden = nn.Sequential(*[
+            Conv(ch_hidden, ch_hidden, 3) for _ in range(depth)])
+        self.output = nn.Conv2d(ch_hidden, ch_out, 1)
+        nn.init.zeros_(self.output.weight)
+        nn.init.zeros_(self.output.bias)  # type: ignore
+
+    def forward(self, x):
+        z = self.input(x)
+        return self.output(z + self.hidden(z))
+
+
 class CustomHeadedYolo(nn.Module):
     """
     Small wrapper to install the custom pose head at the end of a standard YOLO26
@@ -155,18 +175,14 @@ class CustomHeadedYolo(nn.Module):
             original_model = YOLO(
                 f"{path}/{original_model}.pt").model  # type: ignore
         self.base_net: PoseModel = original_model  # type: ignore
+        self.base_net.fuse(False)
         # Freeze the base model.
         self.base_net.eval()
         for param in self.base_net.parameters():
             param.requires_grad = False
         # Create the extra head.
-        self.extra_head = nn.ModuleList(nn.Sequential(
-            Conv(ch, 100, 3),
-            Conv(100, 100, 3),
-            Conv(100, 100, 3),
-            Conv(100, 100, 3),
-            nn.Conv2d(100, 17*5, 1)
-        ) for ch in (64, 128, 256))
+        self.extra_head = nn.ModuleList(
+            CustomHead(ch + 51, 17*5) for ch in (64, 128, 256))
 
     @property
     def device(self):
@@ -197,19 +213,29 @@ class CustomHeadedYolo(nn.Module):
         with torch.no_grad():
             assert not self.base_net.training
             _, pred = self.base_net(x)
+        kpts = pred["one2one"]["kpts"]
+        idx = 0
+        features = []
+        for feats in pred["one2one"]["feats"]:
+            *_, H, W = feats.shape
+            features.append(torch.cat([
+                feats, kpts[..., idx:idx+H*W].view(bs, 51, H, W)
+            ], dim=-3))
+            idx += H*W
         extra = torch.cat([
-            self.extra_head[i](features).view(bs, 17*5, -1)
-            for i, features in enumerate(pred["one2one"]["feats"])
+            self.extra_head[i](feats).view(bs, 17*5, -1)
+            for i, feats in enumerate(features)
         ], dim=2).view(bs, 17, 5, -1)
-        pred["kpts_extra"] = torch.concat([
-            (extra[:, :, 0:2] + self.anchors) * self.strides,
+        pred["kpts_extra"] = torch.cat([
+            kpts.view(bs, 17, 3, -1)[..., :2, :]
+            + extra[:, :, 0:2] * self.strides,
             torch.exp(extra[:, :, 2:4]) * self.strides,
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
 
 
-def compute_loss_base(pred: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thres=0.05) -> torch.Tensor:
+def compute_loss_base(pred: torch.Tensor, conf: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thres=0.05) -> torch.Tensor:
     """
     Computes the weighted negative log likelihood loss for 2D Gaussian in the
     predictions against the ground truth.
@@ -223,7 +249,7 @@ def compute_loss_base(pred: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thre
     ], dim=-2)
     diff = gt_xy - mu
     return torch.mean(util.gaussian_nll(L, diff) * w) \
-        + w_mse * torch.mean(torch.sum(diff*diff, dim=-1) * w)
+        + w_mse * torch.mean(torch.sum(diff*diff, dim=-1) * w * conf)
 
 
 def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float = 0.05):
@@ -239,6 +265,7 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float =
     all_kpts = all_kpts.view(bs, 17, 3, -1)
     all_kpts[:, :, :2] = (all_kpts[:, :, :2] + anchors) * strides
     preds = []
+    confs = []
     gts = []
     for b in range(bs):
         valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
@@ -256,14 +283,17 @@ def compute_loss(pred, gt: torch.Tensor, model, w_mse: float, threshold: float =
         # Hungarian Matching (Push to CPU only for the solver)
         cost_np = cost_matrix.detach().cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
-        valid_match = dist_matrix[row_idx, col_idx] < 30.0
+        valid_match = cost_np[row_idx, col_idx] < 1000.0
         matched_pred_indices = valid_idx[row_idx[valid_match]]
         preds.append(
             pred["kpts_extra"][b, :, matched_pred_indices].view(17, 5, -1).permute(2, 0, 1))
+        confs.append(torch.sigmoid(
+            pred["one2one"]["kpts"][b, :, matched_pred_indices].view(17, 3, -1).permute(2, 0, 1)[..., 2]))
         gts.append(b_gt[col_idx[valid_match]])
     if len(preds) == 0:
         return torch.tensor(0.0, device=gt.device, requires_grad=True)
-    return compute_loss_base(torch.concat(preds, dim=0), torch.concat(gts, dim=0), w_mse)
+    return compute_loss_base(
+        torch.cat(preds, dim=0), torch.cat(confs, dim=0), torch.cat(gts, dim=0), w_mse)
 
 
 def train_epoch(model, loader, optimizer, w_mse: float):
@@ -349,8 +379,8 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     if testing:
         # This configuration is only for the sanity check, it is not used for the
         # actual training of the models.
-        train = torch.utils.data.Subset(full_train, range(32, 160))
-        val = torch.utils.data.Subset(full_train, range(32))
+        train = torch.utils.data.Subset(full_train, range(64, 192))
+        val = torch.utils.data.Subset(full_train, range(64))
     else:
         train = full_train
         val = dataset.YoloDataset(f"{os.path.dirname(__file__)}/data/yolo/val")
