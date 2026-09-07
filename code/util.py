@@ -376,3 +376,8 @@ def mahalanobis(L: torch.Tensor, diff: torch.Tensor) -> torch.Tensor:
     v: torch.Tensor = torch.linalg.solve_triangular(
         L, diff.unsqueeze(-1), upper=False)
     return (v.mT @ v).flatten(-3, -1)
+
+
+def gaussian_nll(L: torch.Tensor, diff: torch.Tensor) -> torch.Tensor:
+    """ Compute the NLL given Cholesky factor of covariance and residuals. """
+    return mahalanobis(L, diff) + 2.0 * L.diagonal(0, -2, -1).log().sum(-1)

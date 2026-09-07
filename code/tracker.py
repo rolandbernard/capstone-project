@@ -166,10 +166,8 @@ class Tracker:
         for j in range(num_detect):
             total_cov = covs[j] + pred2d_covar
             L = util.safe_cholesky(total_cov)
-            dist = util.mahalanobis(L, kpts[j] - pred_kpts)
-            logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
-            cost_matrix[:num_track, j] = dist + logdet \
-                - num_dim*self.mo_threshold
+            cost_matrix[:num_track, j] \
+                = util.gaussian_nll(L, kpts[j] - pred_kpts) - num_dim*self.mo_threshold
         # Run Hungarian matching.
         cost_np = cost_matrix.detach().cpu().numpy()
         row_idx, col_idx = scipy.optimize.linear_sum_assignment(cost_np)
@@ -215,12 +213,9 @@ class Tracker:
                     [util.per_point_cov(c, 2) for c in m_covs]
                 )
                 # Compute cost for reprojection into new camera view.
-                pred2 = cam2.project_pinhole(mean3d) \
-                    .view(num_detect, num_dim)
+                pred2 = cam2.project_pinhole(mean3d).view(num_detect, num_dim)
                 L = util.safe_cholesky(covs)
-                dist2 = util.mahalanobis(L, kpts - pred2)
-                logdet2 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
-                cost_sum = dist2 + logdet2
+                cost_sum = util.gaussian_nll(L, kpts - pred2)
                 # Compute cost for reprojection into all prev camera view.
                 for past_c, past_d in track.items():
                     kpt1 = detections[past_c][0][past_d]
@@ -229,12 +224,10 @@ class Tracker:
                         .view(num_detect, num_dim)
                     L = util.safe_cholesky(cov1)
                     diff1 = kpt1.expand(num_detect, num_dim) - pred1
-                    dist1 = util.mahalanobis(L, diff1)
-                    logdet1 = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
-                    cost_sum += dist1 + logdet1
+                    cost_sum += util.gaussian_nll(L, diff1)
                 # Average cost over all reprojections.
-                cost_matrix[t_idx, :] = (cost_sum / (len(track) + 1)) \
-                    - (num_dim * self.mn_threshold)
+                cost_matrix[t_idx, :] \
+                    = (cost_sum / (len(track) + 1)) - num_dim*self.mn_threshold
             # Run Hungarian matching.
             cost_np = cost_matrix.detach().cpu().numpy()
             tr_idx, det_idx = scipy.optimize.linear_sum_assignment(cost_np)
@@ -420,10 +413,8 @@ class CrossViewFirstTracker(Tracker):
                         kpts, covs = det[0][m], det[1][m]
                         total_cov = covs + a_pred_covar[i]
                         L = util.safe_cholesky(total_cov)
-                        dist = util.mahalanobis(L, kpts - a_pred_kpts[i])
-                        logdet = 2.0 * L.diagonal(0, -2, -1).log().sum(-1)
-                        cost_matrix[:num_track, j] += dist + logdet \
-                            - num_dim*self.mo_threshold
+                        cost_matrix[:num_track, j] \
+                            += util.gaussian_nll(L, kpts - a_pred_kpts[i]) - num_dim*self.mo_threshold
                         count += 1
                 cost_matrix[:num_track, j] /= count
         # Run Hungarian matching.

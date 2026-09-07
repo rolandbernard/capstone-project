@@ -221,10 +221,8 @@ def compute_loss_base(pred: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thre
         torch.stack([a, torch.zeros_like(a)], dim=-1),
         torch.stack([c, b], dim=-1)
     ], dim=-2)
-    logdet = 2.0 * (torch.log(a) + torch.log(b))
     diff = gt_xy - mu
-    nll = logdet + util.mahalanobis(L, diff)
-    return torch.mean(nll * w) \
+    return torch.mean(util.gaussian_nll(L, diff) * w) \
         + w_mse * torch.mean(torch.sum(diff*diff, dim=-1) * w)
 
 
