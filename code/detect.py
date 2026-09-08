@@ -105,11 +105,12 @@ class PoseDetector:
 class CustomHead(nn.Module):
     """ Output head for the custom YOLO model. """
 
-    def __init__(self, ch_in: int, ch_out: int, ch_hidden=128, depth=3):
+    def __init__(self, ch_in: int, ch_out: int, ch_hidden=128, depth=3, drop=0.2):
         super().__init__()
         self.input = Conv(ch_in, ch_hidden, 3)
         self.hidden = nn.Sequential(*[
-            Conv(ch_hidden, ch_hidden, 3) for _ in range(depth)])
+            Conv(ch_hidden, ch_hidden, 3) for _ in range(depth)
+        ] + [nn.Dropout2d(drop)])
         self.output = nn.Conv2d(ch_hidden, ch_out, 1)
         nn.init.zeros_(self.output.weight)
         nn.init.zeros_(self.output.bias)  # type: ignore
@@ -374,7 +375,7 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
     """
     util.set_seed(42)
     nets = util.net_storage_in(nets_dir, stat_dir, model.to(util.DEVICE), 1e-3)
-    full_train = dataset.YoloDataset(
+    full_train = dataset.AugmentingYoloDataset(
         f"{os.path.dirname(__file__)}/data/yolo/train")
     if testing:
         # This configuration is only for the sanity check, it is not used for the

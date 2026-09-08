@@ -1,6 +1,7 @@
 
 import os
 import io
+import math
 import json
 import random
 import zipfile
@@ -13,6 +14,7 @@ import cv2
 import gdown
 import torch
 from torch.utils.data import Dataset
+import torchvision.transforms.v2.functional as F
 
 import source
 from camera import Camera
@@ -463,6 +465,95 @@ class YoloDataset(Dataset):
         ann = torch.zeros(10, 17, 3)
         ann[:len(an)] = torch.tensor(an)
         return img, ann
+
+
+class AugmentingYoloDataset(YoloDataset):
+    """ Augmented version of the YOLO Dataset. """
+
+    def __init__(self, root_dir: str = "./data/yolo/train"):
+        super().__init__(root_dir)
+
+    def __getitem__(self, idx):
+        img, ann = super().__getitem__(idx)
+        if random.random() > 0.5:
+            img = F.adjust_brightness(
+                img, brightness_factor=random.uniform(0.8, 1.2))
+            img = F.adjust_contrast(
+                img, contrast_factor=random.uniform(0.8, 1.2))
+        if random.random() > 0.5:
+            img, ann = self.random_scale(img, ann)
+        if random.random() > 0.5:
+            img, ann = self.random_rotation(img, ann)
+        if random.random() > 0.5:
+            img, ann = self.hflip(img, ann)
+        if random.random() > 0.5:
+            img, ann = self.random_translate(img, ann)
+        if random.random() > 0.5:
+            img = self.add_gaussian_noise(img)
+        if random.random() > 0.5:
+            img = F.gaussian_blur(img, kernel_size=[3, 3], sigma=[0.1, 1.5])
+        if random.random() > 0.5:
+            img = self.random_cutout(img)
+        return img, ann
+
+    def hflip(self, img, ann):
+        _, _, W = img.shape
+        ann = ann.clone()
+        ann[..., 0] = W - ann[..., 0]
+        return F.hflip(img), ann
+
+    def random_scale(self, img, ann, scale_range=(0.8, 1.2)):
+        _, H, W = img.shape
+        scale = random.uniform(*scale_range)
+        img = F.affine(
+            img, angle=0, translate=[0, 0], scale=scale,
+            shear=0, fill=0.5)  # type: ignore
+        ann = ann.clone()
+        center_x, center_y = W / 2.0, H / 2.0
+        ann[..., 0] = center_x + (ann[..., 0] - center_x) * scale
+        ann[..., 1] = center_y + (ann[..., 1] - center_y) * scale
+        return img, ann
+
+    def random_rotation(self, img, ann, max_angle=5):
+        _, H, W = img.shape
+        angle = random.uniform(-max_angle, max_angle)
+        img = F.rotate(img, angle=angle, fill=0.5)  # type: ignore
+        ann = ann.clone()
+        cx, cy = W / 2.0, H / 2.0
+        rad = math.radians(-angle)
+        x = ann[..., 0] - cx
+        y = ann[..., 1] - cy
+        ann[..., 0] = cx + (x * math.cos(rad) - y * math.sin(rad))
+        ann[..., 1] = cy + (x * math.sin(rad) + y * math.cos(rad))
+        return img, ann
+
+    def random_translate(self, img, ann, max_shift=0.1):
+        _, H, W = img.shape
+        dx = int(random.uniform(-max_shift, max_shift) * W)
+        dy = int(random.uniform(-max_shift, max_shift) * H)
+        img = F.affine(
+            img, angle=0, translate=[dx, dy], scale=1.0,
+            shear=0, fill=0.5)  # type: ignore
+        ann = ann.clone()
+        ann[..., 0] += dx
+        ann[..., 1] += dy
+        return img, ann
+
+    def add_gaussian_noise(self, img, std_range=(0.01, 0.05)):
+        std = random.uniform(*std_range)
+        noise = torch.randn_like(img) * std
+        return torch.clamp(img + noise, 0.0, 1.0)
+
+    def random_cutout(self, img, num_holes=2, max_size=0.15):
+        _, H, W = img.shape
+        img = img.clone()
+        for _ in range(num_holes):
+            hole_h = int(H * random.uniform(0.05, max_size))
+            hole_w = int(W * random.uniform(0.05, max_size))
+            y1 = random.randint(0, H - hole_h)
+            x1 = random.randint(0, W - hole_w)
+            img[:, y1:y1 + hole_h, x1:x1 + hole_w] = 0.0
+        return img
 
 
 class KalmanDataset(Dataset):
