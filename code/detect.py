@@ -102,49 +102,6 @@ class PoseDetector:
         return self
 
 
-class CustomPoseDetector(PoseDetector):
-    """
-    This is an wrapper class around the YOLO model with the custom keypoint
-    prediction head. This extends `PoseDetector` even though it does not share
-    nearly any of its functionality.
-    """
-
-    def __init__(self, model: CustomHeadedYolo, threshold: float = 0.5, compile: bool = True):
-        model.eval()
-        if compile:
-            model.compile()
-        self.model = model
-        self.threshold = threshold
-        self.num_keypoint = 17
-
-    def detect_base(self, images: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """
-        Run the detection algorithm and return discovered keypoints.
-        """
-        assert not self.model.training
-        pred = self.model(images)
-        valid_mask = torch.sigmoid(pred["one2one"]["scores"]) > self.threshold
-        results = []
-        for b in range(images.shape[0]):
-            valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
-            kpts = pred["kpts_extra"][b, :, valid_idx] \
-                .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
-            mu = kpts[..., :2]
-            a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
-            # Compute variance based on cholesky factors.
-            cov = torch.stack([
-                torch.stack([a*a, a*c], dim=-1),
-                torch.stack([a*c, c*c + b*b], dim=-1)
-            ], dim=-2)
-            # Diagonalize the covariances assuming independence.
-            cov = torch.diag_embed(cov.permute(0, 2, 3, 1), dim1=1, dim2=3)
-            results.append((
-                mu.reshape(-1, self.num_keypoint*2),
-                cov.reshape(-1, self.num_keypoint*2, self.num_keypoint*2)
-            ))
-        return results
-
-
 class CustomHead(nn.Module):
     """ Output head for the custom YOLO model. """
 
@@ -233,6 +190,49 @@ class CustomHeadedYolo(nn.Module):
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
+
+
+class CustomPoseDetector(PoseDetector):
+    """
+    This is an wrapper class around the YOLO model with the custom keypoint
+    prediction head. This extends `PoseDetector` even though it does not share
+    nearly any of its functionality.
+    """
+
+    def __init__(self, model: CustomHeadedYolo, threshold: float = 0.5, compile: bool = True):
+        model.eval()
+        if compile:
+            model.compile()
+        self.model = model
+        self.threshold = threshold
+        self.num_keypoint = 17
+
+    def detect_base(self, images: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Run the detection algorithm and return discovered keypoints.
+        """
+        assert not self.model.training
+        pred = self.model(images)
+        valid_mask = torch.sigmoid(pred["one2one"]["scores"]) > self.threshold
+        results = []
+        for b in range(images.shape[0]):
+            valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
+            kpts = pred["kpts_extra"][b, :, valid_idx] \
+                .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
+            mu = kpts[..., :2]
+            a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
+            # Compute variance based on cholesky factors.
+            cov = torch.stack([
+                torch.stack([a*a, a*c], dim=-1),
+                torch.stack([a*c, c*c + b*b], dim=-1)
+            ], dim=-2)
+            # Diagonalize the covariances assuming independence.
+            cov = torch.diag_embed(cov.permute(0, 2, 3, 1), dim1=1, dim2=3)
+            results.append((
+                mu.reshape(-1, self.num_keypoint*2),
+                cov.reshape(-1, self.num_keypoint*2, self.num_keypoint*2)
+            ))
+        return results
 
 
 def compute_loss_base(pred: torch.Tensor, conf: torch.Tensor, gt: torch.Tensor, w_mse: float, w_thres=0.05) -> torch.Tensor:
