@@ -477,9 +477,9 @@ class AugmentingYoloDataset(YoloDataset):
         img, ann = super().__getitem__(idx)
         if random.random() > 0.5:
             img = F.adjust_brightness(
-                img, brightness_factor=random.uniform(0.8, 1.2))
+                img, brightness_factor=random.uniform(0.7, 1.3))
             img = F.adjust_contrast(
-                img, contrast_factor=random.uniform(0.8, 1.2))
+                img, contrast_factor=random.uniform(0.7, 1.3))
         if random.random() > 0.5:
             img, ann = self.random_scale(img, ann)
         if random.random() > 0.5:
@@ -514,7 +514,7 @@ class AugmentingYoloDataset(YoloDataset):
         ann[..., 1] = center_y + (ann[..., 1] - center_y) * scale
         return img, ann
 
-    def random_rotation(self, img, ann, max_angle=5):
+    def random_rotation(self, img, ann, max_angle=10):
         _, H, W = img.shape
         angle = random.uniform(-max_angle, max_angle)
         img = F.rotate(img, angle=angle, fill=0.5)  # type: ignore
@@ -527,7 +527,7 @@ class AugmentingYoloDataset(YoloDataset):
         ann[..., 1] = cy + (x * math.sin(rad) + y * math.cos(rad))
         return img, ann
 
-    def random_translate(self, img, ann, max_shift=0.1):
+    def random_translate(self, img, ann, max_shift=0.15):
         _, H, W = img.shape
         dx = int(random.uniform(-max_shift, max_shift) * W)
         dy = int(random.uniform(-max_shift, max_shift) * H)
@@ -544,15 +544,15 @@ class AugmentingYoloDataset(YoloDataset):
         noise = torch.randn_like(img) * std
         return torch.clamp(img + noise, 0.0, 1.0)
 
-    def random_cutout(self, img, num_holes=2, max_size=0.15):
+    def random_cutout(self, img, num_holes=2, max_size=0.25):
         _, H, W = img.shape
         img = img.clone()
-        for _ in range(num_holes):
+        for _ in range(random.randint(1, num_holes)):
             hole_h = int(H * random.uniform(0.05, max_size))
             hole_w = int(W * random.uniform(0.05, max_size))
             y1 = random.randint(0, H - hole_h)
             x1 = random.randint(0, W - hole_w)
-            img[:, y1:y1 + hole_h, x1:x1 + hole_w] = 0.0
+            img[:, y1:y1 + hole_h, x1:x1 + hole_w] = 0.5
         return img
 
 
