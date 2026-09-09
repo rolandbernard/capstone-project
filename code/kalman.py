@@ -188,8 +188,11 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
             self.constr_val = self.as_parameter(init.constr_val)
         if bias:
             self.bias = self.as_parameter(torch.zeros_like(init.init_mean))
+        else:
+            self.bias = None
         self.obs_cov_scale = self.as_parameter(
             torch.tensor(init.obs_cov_scale))
+        self.eval()
 
     @property
     def device(self):

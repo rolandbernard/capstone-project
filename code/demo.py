@@ -9,6 +9,7 @@ import numpy as np
 import scipy.interpolate
 
 import util
+import kalman
 from camera import Camera, triangulate
 from detect import PoseDetector
 from source import OfflineVideoSource, OnlineVideoSource
@@ -349,6 +350,8 @@ if __name__ == "__main__":
                         help="Do not use rigid body constraints")
     parser.add_argument("--use-walled", action="store_true",
                         help="Use walled physics constraints")
+    parser.add_argument("--use-learned", action="store_true",
+                        help="Use the learned physics model")
     parser.add_argument("--cross-first", action="store_true",
                         help="Match using cross-view association first")
     parser.add_argument("--no-cloud", action="store_true",
@@ -357,6 +360,8 @@ if __name__ == "__main__":
                         help="Only load intrinsics from files")
     parser.add_argument("--cams-only", action="store_true",
                         help="Only show camera positions")
+    parser.add_argument("--no-video", action="store_true",
+                        help="Do not show the projection onto the video stream")
     args = parser.parse_args()
     cameras = [Camera() for _ in args.urls]
     if args.cams is not None:
@@ -414,9 +419,13 @@ if __name__ == "__main__":
         source.to(util.DEVICE)
         detector = PoseDetector()
         detector.to(util.DEVICE)
-        physics = build_physics(1.0) if args.no_constraint \
-            else build_walled_physics(1.0) if args.use_walled \
-            else build_constrained_physics(1.0)
+        if args.use_learned:
+            physics = kalman.LearnedPhysics(build_constrained_physics())
+            physics.load_state_dict(torch.load("nets/kalman/20.net"))
+        else:
+            physics = build_physics(1.0) if args.no_constraint \
+                else build_walled_physics(1.0) if args.use_walled \
+                else build_constrained_physics(1.0)
         physics.to(util.DEVICE)
         tracker_cls = CrossViewFirstTracker if args.cross_first else Tracker
         tracker = tracker_cls(detector, physics)
@@ -436,14 +445,15 @@ if __name__ == "__main__":
                 tracker.update(cameras, frames)
                 last_ts = ts
                 player.update(tracker.get_prediction())
-                show_cv2_images(
-                    cameras,
-                    [cv2.cvtColor(f.detach().cpu().numpy(), cv2.COLOR_RGB2BGR)
-                     for f in frames],
-                    tracker.get_prediction()
-                )
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                if not args.no_video:
+                    show_cv2_images(
+                        cameras,
+                        [cv2.cvtColor(f.detach().cpu().numpy(), cv2.COLOR_RGB2BGR)
+                         for f in frames],
+                        tracker.get_prediction()
+                    )
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
     else:
         while True:
             player.update([])

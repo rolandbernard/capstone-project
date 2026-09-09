@@ -154,12 +154,10 @@ class Tracker:
         # Project track to 2d camera plane. Also project covariances.
         pred_means = torch.stack(
             [track.mean[:self.num_keypoint*3] for track in self.tracks])
-        pred_jacs, pred_kpts = kalman.batched_jacobian(
-            lambda x: cam.project_pinhole(x.view(-1, 3)).view(-1, self.num_keypoint*2), pred_means)
-        pred_covar = torch.stack([track.cov[:self.num_keypoint*3, :self.num_keypoint*3]
-                                 for track in self.tracks])
-        pred2d_covar = util.sanitize_covariance(
-            pred_jacs @ pred_covar @ pred_jacs.mT)
+        pred_covar = torch.stack([
+            track.cov[:self.num_keypoint*3, :self.num_keypoint*3] for track in self.tracks])
+        pred_kpts, pred2d_covar = project_points_and_covs(
+            pred_means, pred_covar, cam)
         # Build cost matrix.
         cost_matrix = torch.zeros(
             (num_track + num_detect, num_detect), device=kpts.device)
@@ -399,13 +397,12 @@ class CrossViewFirstTracker(Tracker):
                 # Project track to 2d camera plane. Also project covariances.
                 pred_means = torch.stack(
                     [track.mean[:self.num_keypoint*3] for track in self.tracks])
-                pred_jacs, pred_kpts = kalman.batched_jacobian(
-                    lambda x: cam.project_pinhole(x.view(-1, 3)).view(-1, self.num_keypoint*2), pred_means)
-                pred_covar = torch.stack([track.cov[:self.num_keypoint*3, :self.num_keypoint*3]
-                                         for track in self.tracks])
-                pred_covar = pred_jacs @ pred_covar @ pred_jacs.mT
+                pred_covar = torch.stack(
+                    [track.cov[:self.num_keypoint*3, :self.num_keypoint*3] for track in self.tracks])
+                pred_kpts, pred2d_covar = project_points_and_covs(
+                    pred_means, pred_covar, cam)
                 a_pred_kpts.append(pred_kpts)
-                a_pred_covar.append(pred_covar)
+                a_pred_covar.append(pred2d_covar)
             for j, match in enumerate(zip(*matched)):
                 count = 0
                 for i, (cam, m, det) in enumerate(zip(cams, match, detections)):
@@ -458,6 +455,21 @@ class CrossViewFirstTracker(Tracker):
                 new_tracks.append(track)
         self.add_time_stat("update", t_start)
         self.tracks = new_tracks
+
+
+def project_points_and_covs(pts3d: torch.Tensor, cov3d: torch.Tensor, cam: Camera, full=False) -> tuple[torch.Tensor, torch.Tensor]:
+    """ Project points and covariances from 3d to the camera plane. """
+    *_, D = pts3d.shape
+    N = D // 3 * 2
+    if full:
+        def proj(x):
+            return cam.project(x.view(-1, 3)).view(-1, N)
+    else:
+        def proj(x):
+            return cam.project_pinhole(x.view(-1, 3)).view(-1, N)
+    jacs, pts2d = kalman.batched_jacobian(proj, pts3d)
+    cov2d = util.sanitize_covariance(jacs @ cov3d @ jacs.mT)
+    return pts2d, cov2d
 
 
 def build_physics(scale=100.0) -> LinearPhysics:

@@ -7,8 +7,10 @@ import cv2
 import scipy.ndimage
 import pyvista as pv
 import numpy as np
+from matplotlib.patches import Ellipse
 
 import util
+import tracker
 
 
 class BaseSkeletonPlayer:
@@ -286,8 +288,10 @@ class MinimalSkeletonPlayer(SkeletonPlayer):
 
     def __init__(self, track, fps: float, center=(0, 0, 0), up=(0, -1, 0), gt=None):
         super().__init__(
-            [], [[{"id": 0, "kpts": frame}] for frame in track], fps, center, up,
-            gt_frames=None if gt is None else [[{"id": 0, "kpts": frame}] for frame in gt]
+            [], [[{"id": 0, "kpts": frame}]
+                 for frame in track], fps, center, up,
+            gt_frames=None if gt is None else [
+                [{"id": 0, "kpts": frame}] for frame in gt]
         )
 
 
@@ -343,6 +347,25 @@ def load_from_files(
     return player
 
 
+def confidence_ellipse_params(cov, n_std=2.0):
+    """ Compute width height and angle of a 2d confidence ellipse. """
+    vals, vecs = np.linalg.eigh(cov)
+    order = vals.argsort()[::-1]
+    vals, vecs = vals[order], vecs[:, order]
+    theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+    width, height = 2 * n_std * np.sqrt(np.maximum(0, vals))
+    return width, height, theta
+
+
+def draw_confidence_ellipse(mean_x, mean_y, cov, ax, n_std=2.0):
+    """ Draw a confidence ellipse on a matplotlib plot. """
+    width, height, theta = confidence_ellipse_params(cov, n_std)
+    ellipse = Ellipse(
+        xy=(mean_x, mean_y), width=width, height=height,
+        angle=theta, facecolor="none", edgecolor="blue")
+    return ax.add_patch(ellipse)
+
+
 def show_cv2_images(cams: list, imgs: list[np.ndarray], tracks: list, gt_tracks: None | list = None):
     """ Show images from the cameras in OpenCV image showing tracks. """
     vis_frames = []
@@ -379,6 +402,18 @@ def show_cv2_images(cams: list, imgs: list[np.ndarray], tracks: list, gt_tracks:
                         (int(kpts[j, 0, 0]), int(kpts[j, 0, 1])),
                         (color[2], color[1], color[0]), 3
                     )
+                if isinstance(track, tracker.Track):
+                    pts, covs = tracker.project_points_and_covs(
+                        track.get_keypoints(), track.get_covariances(), cam, True)
+                    for pt, cov in zip(pts.cpu().numpy(), covs.cpu().numpy()):
+                        width, height, theta = confidence_ellipse_params(cov, 1)
+                        cv2.ellipse(
+                            vis_frame,
+                            (int(pt[0].item()), int(pt[1].item())),
+                            (int(0.5 * width), int(0.5 * height)),
+                            int(theta), 0, 360,
+                            (color[2], color[1], color[0]), 1
+                        )
             vis_frames.append(vis_frame)
     if len(vis_frames) > 0:
         if len(vis_frames) < 8:
