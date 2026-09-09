@@ -11,7 +11,7 @@ import scipy.interpolate
 import util
 import kalman
 from camera import Camera, triangulate
-from detect import PoseDetector
+from detect import PoseDetector, CustomHeadedYolo, CustomPoseDetector
 from source import OfflineVideoSource, OnlineVideoSource
 from tracker import (
     CrossViewFirstTracker, Tracker,
@@ -362,6 +362,8 @@ if __name__ == "__main__":
                         help="Only show camera positions")
     parser.add_argument("--no-video", action="store_true",
                         help="Do not show the projection onto the video stream")
+    parser.add_argument("--learned-yolo", action="store_true",
+                        help="Use the custom learned YOLO model")
     args = parser.parse_args()
     cameras = [Camera() for _ in args.urls]
     if args.cams is not None:
@@ -417,7 +419,12 @@ if __name__ == "__main__":
         source.cameras = cameras
         source.resize = tuple(args.resize) if args.resize is not None else None
         source.to(util.DEVICE)
-        detector = PoseDetector()
+        if args.learned_yolo:
+            model = CustomHeadedYolo()
+            model.load_state_dict(torch.load("nets/yolo/0.net"))
+            detector = CustomPoseDetector(model)
+        else:
+            detector = PoseDetector()
         detector.to(util.DEVICE)
         if args.use_learned:
             physics = kalman.LearnedPhysics(build_constrained_physics())

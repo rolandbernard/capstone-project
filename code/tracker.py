@@ -109,6 +109,12 @@ class Tracker:
         self.num_keypoint = num_keypoint
         self.timing_stats = {}
 
+    def reset(self):
+        """ Reset the current tracks and timing statistics. """
+        self.last_id = 0
+        self.tracks = []
+        self.timing_stats = {}
+
     def add_time_stat(self, stage: str, start: float):
         """ Add a call to the timing stats that ended now and started at the given time. """
         if stage not in self.timing_stats:
@@ -468,8 +474,7 @@ def project_points_and_covs(pts3d: torch.Tensor, cov3d: torch.Tensor, cam: Camer
         def proj(x):
             return cam.project_pinhole(x.view(-1, 3)).view(-1, N)
     jacs, pts2d = kalman.batched_jacobian(proj, pts3d)
-    cov2d = util.sanitize_covariance(jacs @ cov3d @ jacs.mT)
-    return pts2d, cov2d
+    return pts2d, util.sanitize_covariance(jacs @ cov3d @ jacs.mT)
 
 
 def build_physics(scale=100.0) -> LinearPhysics:

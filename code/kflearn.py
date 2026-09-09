@@ -1,13 +1,17 @@
 
 import os
+import json
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import numpy as np
 
 import util
 import dataset
 import kalman
+import tracker
+import detect
 from camera import Camera
 from util import NetStorage
 
@@ -207,3 +211,40 @@ def train_epochs_in(num_epochs: int, nets_dir: str | None, stat_dir: str | None,
         val, 32, shuffle=True, drop_last=True, num_workers=8,
         persistent_workers=True, pin_memory=True, prefetch_factor=4)
     train_epochs(nets, train_loader, val_loader, num_epochs, callback)
+
+
+def evaluate_params(values: list, apply, path: str = "."):
+    """
+    Evaluate a number of parameters on the training samples selected for tuning
+    of the hyper-parameters. The `apply` function should apply the value to the
+    physics, model, and tracker.
+    """
+    files = sorted(os.listdir(f"{path}/data/tune"))
+    data = dataset.CmuPanopticDataset(path=f"{path}/data/panoptic")
+    physics = kalman.LearnedPhysics(tracker.build_constrained_physics())
+    physics.load_state_dict(torch.load(f"{path}/nets/kalman/20.net"))
+    physics.to(util.DEVICE)
+    model = detect.CustomHeadedYolo(path=f"{path}/nets")
+    model.load_state_dict(torch.load(f"{path}/nets/yolo/103.net"))
+    detector = detect.CustomPoseDetector(model, cache=True)
+    detector.to(util.DEVICE)
+    track = tracker.Tracker(detector, physics)
+    for value in values:
+        print(f"for {value}...", end="")
+        apply(value, physics, detector, track)
+        mpjpe, motp, precision, recall = [], [], [], []
+        for file in files:
+            track.reset()
+            source = data.get_source(file[:-5], num_vga_cams=4)
+            source.to(util.DEVICE)
+            _, frames, _ = track.evaluate(source, progress=0, limit=30*25)
+            with open(f"{path}/data/tune/{file}") as f:
+                gt_frames = json.load(f)
+            metrics = util.evaluate_mot_metrics(gt_frames, frames)
+            mpjpe.append(metrics["MPJPE"])
+            motp.append(metrics["MOTA"])
+            precision.append(metrics["Precision"])
+            recall.append(metrics["Recall"])
+        print(
+            f"MPJPE {np.mean(mpjpe):0.3f}, MOTA {np.mean(motp):0.2f}, "
+            + f"P {np.mean(precision):0.3f}, R {np.mean(recall):0.3f}")

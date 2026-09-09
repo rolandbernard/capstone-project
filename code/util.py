@@ -296,19 +296,6 @@ def sanitize_covariance(cov: torch.Tensor) -> torch.Tensor:
     return cov + (torch.eye(cov.shape[-1], device=cov.device) * eps)
 
 
-def safe_cholesky(cov: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the cholesky factorization in a way will never fail. If the matrix
-    is not SPD it will be made to be by sanitizing the covariance.
-    """
-    try:
-        return torch.linalg.cholesky(cov)
-    except torch.linalg.LinAlgError:  # type: ignore
-        # Sanitization might be applied repeatedly if necessary.
-        print("warning: covariance matrix is not SPD")
-        return safe_cholesky(sanitize_covariance(cov))
-
-
 def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix"):
     """
     Analyzes a large covariance matrix for symmetry, positive-definiteness, 
@@ -366,6 +353,26 @@ def check_covariance(cov: torch.Tensor, label: str | None = None):
             print(label)
         diagnose_covariance(cov)
         torch.linalg.cholesky(cov)
+
+
+def safe_cholesky(cov: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the cholesky factorization in a way will never fail. If the matrix
+    is not SPD it will be made to be by sanitizing the covariance.
+    """
+    try:
+        return torch.linalg.cholesky(cov)
+    except torch.linalg.LinAlgError:  # type: ignore
+        # Sanitization might be applied repeatedly if necessary.
+        print("warning: covariance matrix is not SPD")
+        for _ in range(10):
+            cov = sanitize_covariance(cov)
+            try:
+                return torch.linalg.cholesky(cov)
+            except torch.linalg.LinAlgError:  # type: ignore
+                pass
+        diagnose_covariance(cov)
+        return torch.linalg.cholesky(cov)
 
 
 def mahalanobis(L: torch.Tensor, diff: torch.Tensor) -> torch.Tensor:

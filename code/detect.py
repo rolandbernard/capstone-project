@@ -1,5 +1,6 @@
 
 import os
+import hashlib
 
 import torch
 import torch.nn as nn
@@ -15,6 +16,39 @@ from camera import Camera
 from util import NetStorage
 
 
+class CachedModel(nn.Module):
+    """ A cache around a model. """
+
+    def __init__(self, base: nn.Module, path: str = f"{os.path.dirname(__file__)}/__pycache__/mcache"):
+        super().__init__()
+        self.base = base
+        self.path = path
+        os.makedirs(path, exist_ok=True)
+        self.eval()
+
+    def forward(self, x: torch.Tensor):
+        # Caching does not make sense for training.
+        assert not self.training
+        md5 = self.hash_tensor(x)
+        file = f"{self.path}/{md5}"
+        if os.path.exists(file):
+            return torch.load(file, x.device)
+        else:
+            res = self.base(x)
+            torch.save(res, file)
+            return res
+
+    def hash_tensor(self, tensor: torch.Tensor) -> str:
+        """ Computes an MD5 hash of a tensor. """
+        # Move to CPU and ensure contiguous memory for hashing
+        data = tensor.detach().cpu().contiguous()
+        hasher = hashlib.md5()
+        hasher.update(data.numpy().tobytes())
+        hasher.update(str(tensor.shape).encode('utf-8'))
+        hasher.update(str(tensor.dtype).encode('utf-8'))
+        return hasher.hexdigest()
+
+
 class PoseDetector:
     """
     This is an wrapper class around the YOLO based pose estimation models. Given
@@ -26,7 +60,7 @@ class PoseDetector:
     def __init__(
         self, model_name: str = "yolo26n-pose", threshold: float = 0.5, kpt_threshold: float = 0.25,
         min_keypoint: int = 3, var_min: float = 16.0, var_vis: float = 0.005, var_inv: float = 5.0,
-        use_bb: bool = True, path: str = "./nets", compile: bool = True
+        use_bb: bool = True, path: str = "./nets", compile: bool = True, cache: bool = False
     ):
         model: PoseModel = YOLO(
             f"{path}/{model_name}.pt").model  # type: ignore
@@ -34,7 +68,10 @@ class PoseDetector:
         model.eval()
         if compile:
             model.compile()
-        self.model = model
+        if cache:
+            self.model = CachedModel(model)
+        else:
+            self.model = model
         self.threshold = threshold
         self.kpt_threshold = kpt_threshold
         self.min_keypoint = min_keypoint
@@ -200,11 +237,14 @@ class CustomPoseDetector(PoseDetector):
     nearly any of its functionality.
     """
 
-    def __init__(self, model: CustomHeadedYolo, threshold: float = 0.5, compile: bool = True):
+    def __init__(self, model: CustomHeadedYolo, threshold: float = 0.5, compile: bool = True, cache: bool = False):
         model.eval()
         if compile:
             model.compile()
-        self.model = model
+        if cache:
+            self.model = CachedModel(model)
+        else:
+            self.model = model
         self.threshold = threshold
         self.num_keypoint = 17
 
@@ -221,7 +261,8 @@ class CustomPoseDetector(PoseDetector):
             kpts = pred["kpts_extra"][b, :, valid_idx] \
                 .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
             mu = kpts[..., :2]
-            a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
+            a, b = kpts[..., 2].clamp(16.0), kpts[..., 3].clamp(16.0)
+            c = kpts[..., 4]
             # Compute variance based on cholesky factors.
             cov = torch.stack([
                 torch.stack([a*a, a*c], dim=-1),
