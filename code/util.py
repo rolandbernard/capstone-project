@@ -365,15 +365,7 @@ def safe_cholesky(cov: torch.Tensor) -> torch.Tensor:
     except torch.linalg.LinAlgError:  # type: ignore
         # Sanitization might be applied repeatedly if necessary.
         print("warning: covariance matrix is not SPD")
-        tol = 1e-6
-        for _ in range(10):
-            cov = sanitize_covariance(cov, tol)
-            try:
-                return torch.linalg.cholesky(cov)
-            except torch.linalg.LinAlgError:  # type: ignore
-                tol *= 4
-        diagnose_covariance(cov)
-        return torch.linalg.cholesky(cov)
+        return torch.linalg.cholesky(sanitize_covariance(cov))
 
 
 def mahalanobis(L: torch.Tensor, diff: torch.Tensor) -> torch.Tensor:

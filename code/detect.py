@@ -237,7 +237,7 @@ class CustomPoseDetector(PoseDetector):
     nearly any of its functionality.
     """
 
-    def __init__(self, model: CustomHeadedYolo, threshold=0.5, compile=True, cache=False, var_scale=2.0, min_var=4.0, inv_var=100.0):
+    def __init__(self, model: CustomHeadedYolo, threshold=0.5, compile=True, cache=False, var_scale=3.0, min_var=16.0, inv_var=100.0):
         model.eval()
         if compile:
             model.compile()
@@ -270,11 +270,10 @@ class CustomPoseDetector(PoseDetector):
                 .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
             mu = kpts[..., :2]
             a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
-            a, b = a.clamp(self.min_var), b.clamp(self.min_var)
             # Compute variance based on cholesky factors.
             cov = torch.stack([
-                torch.stack([a*a, a*c], dim=-1),
-                torch.stack([a*c, c*c + b*b], dim=-1)
+                torch.stack([a*a + self.min_var, a*c], dim=-1),
+                torch.stack([a*c, c*c + b*b + self.min_var], dim=-1)
             ], dim=-2) * torch.where(inv, self.inv_var, self.var_scale).unsqueeze(-1).unsqueeze(-1)
             # Diagonalize the covariances assuming independence.
             cov = torch.diag_embed(cov.permute(0, 2, 3, 1), dim1=1, dim2=3)
