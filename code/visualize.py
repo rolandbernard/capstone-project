@@ -133,6 +133,8 @@ class BaseSkeletonPlayer:
 
     def add_point_cloud(self, points, colors, point_size=2, opacity=0.5):
         """ Add a point cloud or structured mesh to the 3D visualization. """
+        if len(points) == 0:
+            return
         if points.ndim == 3:
             # Create a mesh if we have a dense depth map.
             grid = pv.StructuredGrid()
@@ -407,13 +409,17 @@ def show_cv2_images(cams: list, imgs: list[np.ndarray], tracks: list, gt_tracks:
                         track.get_keypoints(), track.get_covariances(), cam, True)
                     for pt, cov in zip(pts.cpu().numpy(), covs.cpu().numpy()):
                         width, height, theta = confidence_ellipse_params(cov, 1)
-                        cv2.ellipse(
-                            vis_frame,
-                            (int(pt[0].item()), int(pt[1].item())),
-                            (int(0.5 * width), int(0.5 * height)),
-                            int(theta), 0, 360,
-                            (color[2], color[1], color[0]), 1
-                        )
+                        try:
+                            cv2.ellipse(
+                                vis_frame,
+                                (int(pt[0].item()), int(pt[1].item())),
+                                (int(0.5 * width), int(0.5 * height)),
+                                int(theta), 0, 360,
+                                (color[2], color[1], color[0]), 1
+                            )
+                        except cv2.error, ValueError:
+                            # Can happen if the ellipse gets to big.
+                            pass
             vis_frames.append(vis_frame)
     if len(vis_frames) > 0:
         if len(vis_frames) < 8:

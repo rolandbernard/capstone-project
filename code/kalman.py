@@ -23,9 +23,6 @@ class LinearPhysics:
         self.init_mean = init_mean
         self.init_cov = init_cov
         self.get_dyn = lru_cache()(self._get_dyn)
-        # Scaling the observation covariances might be beneficial to account for
-        # linearization noise. (Not applied to constraints.)
-        self.obs_cov_scale = 1.0
 
     def _get_dyn(self, dt: float) -> tuple[torch.Tensor, torch.Tensor]:
         """ Create a new dynamics and covariance matrix for the given timestamp. """
@@ -190,8 +187,8 @@ class LearnedPhysics(nn.Module, ConstrainedPhysics):
             self.bias = self.as_parameter(torch.zeros_like(init.init_mean))
         else:
             self.bias = None
-        self.obs_cov_scale = self.as_parameter(
-            torch.tensor(init.obs_cov_scale))
+        # No longer used. Here for compatibility.
+        self.obs_cov_scale = nn.Parameter(torch.tensor(1.0), False)
         self.eval()
 
     @property

@@ -163,7 +163,7 @@ class CustomHeadedYolo(nn.Module):
     human pose estimation model.
     """
 
-    def __init__(self, original_model: str | PoseModel = "yolo26n-pose", path: str = "./nets", min_var=16.0):
+    def __init__(self, original_model: str | PoseModel = "yolo26n-pose", path: str = "./nets"):
         super().__init__()
         # Acquire the base model.
         if isinstance(original_model, str):
@@ -178,7 +178,6 @@ class CustomHeadedYolo(nn.Module):
         # Create the extra head.
         self.extra_head = nn.ModuleList(
             CustomHead(ch + 51, 17*5) for ch in (64, 128, 256))
-        self.min_var = min_var
 
     @property
     def device(self):
@@ -225,7 +224,7 @@ class CustomHeadedYolo(nn.Module):
         pred["kpts_extra"] = torch.cat([
             (kpts.view(bs, 17, 3, -1)[..., :2, :]
              + extra[:, :, 0:2] + self.anchors) * self.strides,
-            (torch.exp(extra[:, :, 2:4]) * self.strides).clamp(self.min_var),
+            torch.exp(extra[:, :, 2:4]) * self.strides,
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
@@ -238,7 +237,7 @@ class CustomPoseDetector(PoseDetector):
     nearly any of its functionality.
     """
 
-    def __init__(self, model: CustomHeadedYolo, threshold: float = 0.5, compile: bool = True, cache: bool = False):
+    def __init__(self, model: CustomHeadedYolo, threshold=0.5, compile=True, cache=False, var_scale=2.0, min_var=4.0, inv_var=100.0):
         model.eval()
         if compile:
             model.compile()
@@ -248,6 +247,11 @@ class CustomPoseDetector(PoseDetector):
             self.model = model
         self.threshold = threshold
         self.num_keypoint = 17
+        # Scaling the observation covariances might be beneficial to account for
+        # linearization noise. (Not applied to constraints.)
+        self.var_scale = var_scale
+        self.min_var = min_var
+        self.inv_var = inv_var
 
     def detect_base(self, images: torch.Tensor) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """
@@ -259,15 +263,19 @@ class CustomPoseDetector(PoseDetector):
         results = []
         for b in range(images.shape[0]):
             valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
+            inv = torch.sigmoid(pred["one2one"]["kpts"][b, :, valid_idx]
+                                .view(self.num_keypoint, 3, -1)
+                                .permute(2, 0, 1)[..., 2]) < 0.5
             kpts = pred["kpts_extra"][b, :, valid_idx] \
                 .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
             mu = kpts[..., :2]
             a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
+            a, b = a.clamp(self.min_var), b.clamp(self.min_var)
             # Compute variance based on cholesky factors.
             cov = torch.stack([
                 torch.stack([a*a, a*c], dim=-1),
                 torch.stack([a*c, c*c + b*b], dim=-1)
-            ], dim=-2)
+            ], dim=-2) * torch.where(inv, self.inv_var, self.var_scale).unsqueeze(-1).unsqueeze(-1)
             # Diagonalize the covariances assuming independence.
             cov = torch.diag_embed(cov.permute(0, 2, 3, 1), dim1=1, dim2=3)
             results.append((

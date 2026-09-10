@@ -287,12 +287,12 @@ def symmetrize(cov: torch.Tensor) -> torch.Tensor:
     return 0.5 * (cov + cov.mT)
 
 
-def sanitize_covariance(cov: torch.Tensor) -> torch.Tensor:
+def sanitize_covariance(cov: torch.Tensor, tol: float = 1e-6) -> torch.Tensor:
     """ Forces symmetry and ensure SPD by adding jitter. """
     cov = symmetrize(cov)
     # Make this relative because that determines the conditioning.
     max_diag = cov.diagonal(0, -1, -2).max(-1).values.clamp(1)
-    eps = max_diag.unsqueeze(-1).unsqueeze(-1) * 1e-6
+    eps = max_diag.unsqueeze(-1).unsqueeze(-1) * tol
     return cov + (torch.eye(cov.shape[-1], device=cov.device) * eps)
 
 
@@ -365,12 +365,13 @@ def safe_cholesky(cov: torch.Tensor) -> torch.Tensor:
     except torch.linalg.LinAlgError:  # type: ignore
         # Sanitization might be applied repeatedly if necessary.
         print("warning: covariance matrix is not SPD")
+        tol = 1e-6
         for _ in range(10):
-            cov = sanitize_covariance(cov)
+            cov = sanitize_covariance(cov, tol)
             try:
                 return torch.linalg.cholesky(cov)
             except torch.linalg.LinAlgError:  # type: ignore
-                pass
+                tol *= 4
         diagnose_covariance(cov)
         return torch.linalg.cholesky(cov)
 
