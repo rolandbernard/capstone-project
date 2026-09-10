@@ -226,7 +226,7 @@ def evaluate_params(values: list, apply, path: str = "."):
     physics.to(util.DEVICE)
     model = detect.CustomHeadedYolo(path=f"{path}/nets")
     model.load_state_dict(torch.load(f"{path}/nets/yolo/103.net"))
-    detector = detect.CustomPoseDetector(model, cache=True)
+    detector = detect.CustomPoseDetector(model)
     detector.to(util.DEVICE)
     track = tracker.Tracker(detector, physics)
     for value in values:

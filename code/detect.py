@@ -163,7 +163,7 @@ class CustomHeadedYolo(nn.Module):
     human pose estimation model.
     """
 
-    def __init__(self, original_model: str | PoseModel = "yolo26n-pose", path: str = "./nets"):
+    def __init__(self, original_model: str | PoseModel = "yolo26n-pose", path: str = "./nets", min_var=16.0):
         super().__init__()
         # Acquire the base model.
         if isinstance(original_model, str):
@@ -178,6 +178,7 @@ class CustomHeadedYolo(nn.Module):
         # Create the extra head.
         self.extra_head = nn.ModuleList(
             CustomHead(ch + 51, 17*5) for ch in (64, 128, 256))
+        self.min_var = min_var
 
     @property
     def device(self):
@@ -222,9 +223,9 @@ class CustomHeadedYolo(nn.Module):
             for i, feats in enumerate(features)
         ], dim=2).view(bs, 17, 5, -1)
         pred["kpts_extra"] = torch.cat([
-            (kpts.view(bs, 17, 3, -1)[..., :2, :] +
-             extra[:, :, 0:2] + self.anchors) * self.strides,
-            torch.exp(extra[:, :, 2:4]) * self.strides,
+            (kpts.view(bs, 17, 3, -1)[..., :2, :]
+             + extra[:, :, 0:2] + self.anchors) * self.strides,
+            (torch.exp(extra[:, :, 2:4]) * self.strides).clamp(self.min_var),
             extra[:, :, 4:5] * self.strides,
         ], dim=2).view(bs, 17*5, -1)
         return pred
@@ -261,8 +262,7 @@ class CustomPoseDetector(PoseDetector):
             kpts = pred["kpts_extra"][b, :, valid_idx] \
                 .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
             mu = kpts[..., :2]
-            a, b = kpts[..., 2].clamp(16.0), kpts[..., 3].clamp(16.0)
-            c = kpts[..., 4]
+            a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
             # Compute variance based on cholesky factors.
             cov = torch.stack([
                 torch.stack([a*a, a*c], dim=-1),
