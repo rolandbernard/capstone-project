@@ -291,9 +291,10 @@ def sanitize_covariance(cov: torch.Tensor, tol: float = 1e-6) -> torch.Tensor:
     """ Forces symmetry and ensure SPD by adding jitter. """
     cov = symmetrize(cov)
     # Make this relative because that determines the conditioning.
-    max_diag = cov.diagonal(0, -1, -2).max(-1).values.clamp(1)
-    eps = max_diag.unsqueeze(-1).unsqueeze(-1) * tol
-    return cov + (torch.eye(cov.shape[-1], device=cov.device) * eps)
+    diag = cov.diagonal(0, -1, -2)
+    max_diag = diag.max(-1).values.clamp(1).unsqueeze(-1)
+    eps = max_diag * tol - diag.clamp(max=0)
+    return cov + eps.diag_embed()
 
 
 def diagnose_covariance(cov: torch.Tensor, name: str = "Covariance Matrix"):

@@ -169,7 +169,12 @@ class Tracker:
             (num_track + num_detect, num_detect), device=kpts.device)
         for j in range(num_detect):
             total_cov = covs[j] + pred2d_covar
-            L = util.safe_cholesky(total_cov)
+            try:
+                L = util.safe_cholesky(total_cov)
+            except:
+                util.diagnose_covariance(pred_covar)
+                util.diagnose_covariance(pred2d_covar)
+                util.diagnose_covariance(total_cov)
             cost_matrix[:num_track, j] \
                 = util.gaussian_nll(L, kpts[j] - pred_kpts) - num_dim*self.mo_threshold
         # Run Hungarian matching.
