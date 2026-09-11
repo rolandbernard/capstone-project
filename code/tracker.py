@@ -10,7 +10,7 @@ import camera
 import kalman
 import source
 from camera import Camera
-from detect import PoseDetector
+from detect import PoseDetector, CustomHeadedYolo, CustomPoseDetector
 from kalman import LinearPhysics, ConstrainedPhysics
 
 
@@ -571,3 +571,31 @@ def build_walled_physics(scale=100.0, sym=True, center=(0, 0, 0), up=(0, -1, 0))
     return kalman.WalledPhysics(
         dyn_mat, dyn_cov, init_mean, init_cov, constraints, point_mix,
         constr_cov, wall_centers, wall_norm, feet_kpts, 0.05 * scale)
+
+
+def build_tuned(lkalman=True, lyolo=True, constrained=True, confident=False, not_confident=False, path=".") -> Tracker:
+    """ Build the tracker using the tuned model that performed best during evaluation. """
+    if lkalman:
+        physics = kalman.LearnedPhysics(build_constrained_physics())
+        physics.load_state_dict(torch.load(f"{path}/nets/kalman/20.net"))
+    else:
+        physics = build_constrained_physics() if constrained else build_physics()
+    physics.to(util.DEVICE)
+    if lyolo:
+        model = CustomHeadedYolo(path=f"{path}/nets")
+        model.load_state_dict(torch.load(f"{path}/nets/yolo/103.net"))
+        detector = CustomPoseDetector(model)
+        if confident:
+            detector.var_scale = 1.5
+            detector.min_var = 15.0
+            detector.inv_var = 25.0
+        elif not_confident:
+            detector.var_scale = 4.0
+            detector.min_var = 8.0
+            detector.inv_var = 400.0
+    else:
+        detector = PoseDetector(path=f"{path}/nets")
+    detector.to(util.DEVICE)
+    track = Tracker(detector, physics)
+    track.mo_threshold, track.mn_threshold = 2, -6
+    return track

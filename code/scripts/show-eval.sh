@@ -5,7 +5,7 @@ if [ -n "$1" ]; then
     SCENE=$1
 fi
 
-KIND=lkalman
+KIND=tuned
 if [ -n "$2" ]; then
     KIND=$2
 fi

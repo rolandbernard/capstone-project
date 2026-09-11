@@ -92,6 +92,12 @@ class OfflineVideoSource(VideoSource):
         timestamp = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
         return timestamp, frames, cameras
 
+    def scale(self, by: float):
+        """ Scale extrinsics of all contained cameras. """
+        for cam in self.cameras:
+            cam.scale(by)
+        return self
+
     def to(self, *args, **kargs):
         """ Apply the PyTorch `.to` method to all contained cameras. """
         self.cameras = [cam.to(*args, **kargs) for cam in self.cameras]
