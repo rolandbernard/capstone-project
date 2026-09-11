@@ -194,7 +194,7 @@ class Camera:
         *Bs, M = points.shape
         points_cam = self.world_to_camera(points)
         xy, z = points_cam[..., 0:2], points_cam[..., 2:3]
-        return (xy / z.clamp(1e-4)).view(*Bs, M//3*2)
+        return (xy / z.clamp(1e-4)).clamp(-5.0, 5.0).view(*Bs, M//3*2)
 
     def distortion_params(self, xy_norm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """

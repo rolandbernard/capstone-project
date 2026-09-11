@@ -1,6 +1,9 @@
 #!/bin/bash
 
 SCENE=160224_haggling1
+if [ -n "$1" ]; then
+    SCENE=$1
+fi
 
 python demo.py \
     data/panoptic/$SCENE/vga_01_01.mp4 data/panoptic/$SCENE/vga_19_14.mp4  \
@@ -8,4 +11,5 @@ python demo.py \
     --cams data/cams/cam01_01.json data/cams/cam19_14.json \
            data/cams/cam14_03.json data/cams/cam06_15.json \
     --no-cloud --scale 0.01 --learned-yolo
+#     --no-cloud --use-learned --learned-yolo
 

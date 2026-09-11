@@ -364,6 +364,8 @@ if __name__ == "__main__":
                         help="Do not show the projection onto the video stream")
     parser.add_argument("--learned-yolo", action="store_true",
                         help="Use the custom learned YOLO model")
+    parser.add_argument("--confident", action="store_true",
+                        help="Use more confident settings in the custom YOLO model")
     args = parser.parse_args()
     cameras = [Camera() for _ in args.urls]
     if args.cams is not None:
@@ -421,8 +423,12 @@ if __name__ == "__main__":
         source.to(util.DEVICE)
         if args.learned_yolo:
             model = CustomHeadedYolo()
-            model.load_state_dict(torch.load("nets/yolo/0.net"))
+            model.load_state_dict(torch.load("nets/yolo/103.net"))
             detector = CustomPoseDetector(model)
+            if args.confident:
+                detector.var_scale = 1.5
+                detector.min_var = 15.0
+                detector.inv_var = 25.0
         else:
             detector = PoseDetector()
         detector.to(util.DEVICE)

@@ -247,8 +247,8 @@ class CustomPoseDetector(PoseDetector):
             self.model = model
         self.threshold = threshold
         self.num_keypoint = 17
-        # Scaling the observation covariances might be beneficial to account for
-        # linearization noise. (Not applied to constraints.)
+        # Scaling the observation covariances can be beneficial to account for
+        # linearization noise and breakage of the independence assumptions.
         self.var_scale = var_scale
         self.min_var = min_var
         self.inv_var = inv_var
@@ -263,18 +263,20 @@ class CustomPoseDetector(PoseDetector):
         results = []
         for b in range(images.shape[0]):
             valid_idx = valid_mask[b].flatten().nonzero(as_tuple=True)[0]
-            inv = torch.sigmoid(pred["one2one"]["kpts"][b, :, valid_idx]
+            vis = torch.sigmoid(pred["one2one"]["kpts"][b, :, valid_idx]
                                 .view(self.num_keypoint, 3, -1)
-                                .permute(2, 0, 1)[..., 2]) < 0.5
+                                .permute(2, 0, 1)[..., 2])
             kpts = pred["kpts_extra"][b, :, valid_idx] \
                 .view(self.num_keypoint, 5, -1).permute(2, 0, 1)
             mu = kpts[..., :2]
             a, b, c = kpts[..., 2], kpts[..., 3], kpts[..., 4]
-            # Compute variance based on cholesky factors.
+            # Compute variance based on Cholesky factors.
+            vis_t = ((0.5 - vis) / 0.25).clamp(0.0, 1.0)
+            vis_scale = self.var_scale + self.inv_var * vis_t
             cov = torch.stack([
                 torch.stack([a*a + self.min_var, a*c], dim=-1),
                 torch.stack([a*c, c*c + b*b + self.min_var], dim=-1)
-            ], dim=-2) * torch.where(inv, self.inv_var, self.var_scale).unsqueeze(-1).unsqueeze(-1)
+            ], dim=-2) * vis_scale.unsqueeze(-1).unsqueeze(-1)
             # Diagonalize the covariances assuming independence.
             cov = torch.diag_embed(cov.permute(0, 2, 3, 1), dim1=1, dim2=3)
             results.append((
