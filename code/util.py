@@ -287,13 +287,13 @@ def symmetrize(cov: torch.Tensor) -> torch.Tensor:
     return 0.5 * (cov + cov.mT)
 
 
-def sanitize_covariance(cov: torch.Tensor, tol: float = 1e-6) -> torch.Tensor:
+def sanitize_covariance(cov: torch.Tensor) -> torch.Tensor:
     """ Forces symmetry and ensure SPD by adding jitter. """
     cov = symmetrize(cov)
     # Make this relative because that determines the conditioning.
     diag = cov.diagonal(0, -1, -2)
     max_diag = diag.max(-1).values.clamp(1).unsqueeze(-1)
-    eps = max_diag * tol - diag.clamp(max=0)
+    eps = max_diag * 1e-6 - 2 * diag.clamp(max=0)
     return cov + eps.diag_embed()
 
 
@@ -361,12 +361,17 @@ def safe_cholesky(cov: torch.Tensor) -> torch.Tensor:
     Compute the cholesky factorization in a way will never fail. If the matrix
     is not SPD it will be made to be by sanitizing the covariance.
     """
-    try:
-        return torch.linalg.cholesky(cov)
-    except torch.linalg.LinAlgError:  # type: ignore
-        # Sanitization might be applied repeatedly if necessary.
+    L, info = torch.linalg.cholesky_ex(cov)
+    if info.any():
+        # This is a failsafe that should nearly never happen.
         print("warning: covariance matrix is not SPD")
-        return torch.linalg.cholesky(sanitize_covariance(cov))
+        invalid = info != 0
+        icov = cov[invalid]
+        icov = 0.5 * (icov + icov.mT)
+        diag = icov.diagonal(0, -1, -2)
+        jitter = (2 * icov.abs().sum(-1) - 3 * diag).clamp(0).diag_embed()
+        L[invalid] = torch.linalg.cholesky(icov + jitter)
+    return L
 
 
 def mahalanobis(L: torch.Tensor, diff: torch.Tensor) -> torch.Tensor:

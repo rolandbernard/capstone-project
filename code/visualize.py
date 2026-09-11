@@ -314,7 +314,8 @@ class LiveSkeletonPlayer(BaseSkeletonPlayer):
 
 def load_from_files(
     main_file: str, gt_file: None | str = None, streams: None | list[str] = None,
-    no_cloud: bool = False, no_gt: bool = False, env_file: None | str = None
+    no_cloud: bool = True, no_gt: bool = False, env_file: None | str = None,
+    no_streams: bool = True
 ) -> SkeletonPlayer:
     """ Load results and optional ground truth from the given files. """
     data = util.load_json(main_file)
@@ -339,7 +340,8 @@ def load_from_files(
         center, up = env_data.get("center"), env_data.get("up")
         points, colors = env_data.get("points"), env_data.get("colors")
     player = SkeletonPlayer(
-        cams, frames, fps, center, up, gt_frames, streams=streams)
+        cams, frames, fps, center, up, gt_frames,
+        streams=None if no_streams else streams)
     if not no_cloud and points is not None and colors is not None:
         if len(points) > 0 and len(points[0]) > 0 and isinstance(points[0][0], list):
             for pts, clrs in zip(points, colors):
@@ -408,7 +410,8 @@ def show_cv2_images(cams: list, imgs: list[np.ndarray], tracks: list, gt_tracks:
                     pts, covs = tracker.project_points_and_covs(
                         track.get_keypoints(), track.get_covariances(), cam, True)
                     for pt, cov in zip(pts.cpu().numpy(), covs.cpu().numpy()):
-                        width, height, theta = confidence_ellipse_params(cov, 1)
+                        width, height, theta = confidence_ellipse_params(
+                            cov, 1)
                         try:
                             cv2.ellipse(
                                 vis_frame,
@@ -447,6 +450,8 @@ if __name__ == "__main__":
     parser.add_argument("--streams", nargs="+", help="Paths to video streams")
     parser.add_argument("--no-cloud", action="store_true",
                         help="Do not add point clouds to the visualization")
+    parser.add_argument("--no-streams", action="store_true",
+                        help="Do not show the video streams")
     parser.add_argument("--no-gt", action="store_true",
                         help="Do not add show ground truth tracks")
     args = parser.parse_args()
@@ -462,6 +467,6 @@ if __name__ == "__main__":
             print(f"Unable to open environment file '{args.env_path}'")
             exit(1)
     player = load_from_files(
-        args.path, args.gt_path, args.streams,
-        args.no_cloud, args.no_gt, args.env_path)
+        args.path, args.gt_path, args.streams, args.no_cloud,
+        args.no_gt, args.env_path, args.no_streams)
     player.show()
