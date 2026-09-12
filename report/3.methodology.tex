@@ -46,7 +46,7 @@ In the baseline system the state dynamics are modeled by a linear velocity proce
     \mathbf{Q}_k &\approx \mathbf{Q} \Delta t_i + \frac{1}{2} (\mathbf{F} \mathbf{Q} + \mathbf{Q} \mathbf{F}^T) \Delta t_i^2
 \end{align*}
 
-The measurement function $h_c(\mathbf{x}): \mathbb{R}^{102} \to \mathbb{R}^{34}$ acts as a non-linear pinhole projection mapping the 102-dimensional 3D state back to a 34-dimensional observation of 2D coordinates in camera $c$:
+The measurement function $h_c(\mathbf{x}): \mathbb{R}^{102} \to \mathbb{R}^{34}$ acts as a non-linear pinhole projection, mapping the 102-dimensional 3D state back to a 34-dimensional observation of 2D coordinates in camera $c$:
 \begin{align*}
     h_c(\mathbf{x}) &= \begin{bmatrix} \pi_c(\mathbf{p}_1)^T & \pi_c(\mathbf{p}_2)^T & \dots & \pi_c(\mathbf{p}_{17})^T \end{bmatrix}^T
 \end{align*}
@@ -89,12 +89,30 @@ To prevent spurious detections from creating false tracks, the lifecycle of each
 
 \subsection{Skeletal Constraints} \label{arch-constraints}
 
-% TODO
+In the baseline configuration of the system as described above, there are no restrictions on the states that individual keypoints of a person can take and how they may evolve over time. However, it is possible to achieve better results by incorporating into the Kalman filter also prior knowledge about what state may be anatomically plausible and how they are allowed to change over time. Integration of such knowledge into the Kalman filter can be done in either the prediction or the update step. Integration into the prediction is possible by using a non-linear prediction function and liberalizing it the same way as for non-linear observations. Alternatively, they can be encoded in the update step by making use of pseudo-observations. The inclusion of such constraints can improve not only the accuracy of predictions, but also improve the association step by ruling out matches that would violate the constraints.
+
+This project integrates one such kind of knowledge, namely that the length of limbs for a single person remain constant. This is implemented by means of a pseudo-observation that is concatenated with the true observations as described in \cref{arch-filter}. To facilitate this mechanism, the state representation is augmented by adding the length of limbs:
+\begin{align*}
+    \mathbf{x} &= \begin{bmatrix} \mathbf{p}_1^T, \; \dots, \; \mathbf{p}_{17}^T, \; \mathbf{v}_1^T, \; \dots, \; \mathbf{v}_{17}^T, \; l_1, \; \dots, \; l_{12} \end{bmatrix}^T
+\end{align*}
+where each state value $l_i$ represents the length of one or more limbs. These additional state elements interact with neither the positions nor the velocities and are given a low process noise covariance. Note that for this project a set of 12 lengths has been chosen by asserting symmetry between the left and right side of a person. This mean that in addition to asserting a constant limb length, the resulting system also asserts symmetry.
+
+The pseudo-observation that is added to the update step then consists of a small constant observation noise covariance, a constant zero vector for the observation mean, and the measurement function $h_\mathrm{sc}(\mathbf{x}): \mathbb{R}^{114} \to \mathbb{R}^{20}$. The measurement function extracts from the state the value of the constraint violation for each limb:
+\begin{align*}
+    h_\mathrm{sc}(\mathbf{x}) &= \begin{bmatrix} \rho_1(\mathbf{x}) & \rho_2(\mathbf{x}) & \dots & \rho_{20}(\mathbf{p}) \end{bmatrix}^T
+\end{align*}
+where $\rho_j(\mathbf{x})$ is the constraint violation for a single limb length:
+\begin{align*}
+    \rho_j(\mathbf{x}) &= \|\mathbf{p}_{a_j} - \mathbf{p}_{b_j}\|_2 - l_{i_j}
+\end{align*}
+where $a_j$ and $b_j$ are the indices of start and end keypoints of limb $j$, while $i_j$ is the length associated with limb $j$. Note that due to the symmetry assumption, there are more limb constraints than there are length values in the state vector.
+
+By implementing the skeletal constraints as described above, the length values start out with large uncertainty. The pseudo-observations will induce covariance structures that link the length values to the keypoint locations and once the positions of the keypoints has been accurately determined, also the length values will be known with high confidence. Since the process noise of these values is very low, and they do not otherwise intact with the other values in the prediction, their uncertainty will become and remain low.
 
 
 \subsection{Learning Parameters from Data} \label{arch-learning}
 
-% TODO
+
 
 \subsubsection{Custom YOLO Output Head} \label{yolo-head}
 
