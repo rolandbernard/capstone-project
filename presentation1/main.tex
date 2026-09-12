@@ -304,24 +304,6 @@
 \end{frame}
 
 \begin{frame}
-\frametitle{Learning Parameters from Data -- Other Parameters}
-  \begin{items}
-    % TODO
-    \begin{oitem}{\litem}
-      Summary: \\
-      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
-      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
-      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
-      \sitem {\footnotesize Id ut nihil aut et numquam.}
-    \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
-    \end{figure}
-  \end{items}
-\end{frame}
-
-\begin{frame}
 \frametitle{Dataset Overview -- CMU Panoptic Dataset}
   \begin{items}
     \begin{oitem}{\litem}
@@ -405,10 +387,12 @@ tracks n COCO19 format.}
       \sitem {\footnotesize Execution time of detection scales linearly with number of cameras.} \\
       \sitem {\footnotesize Matching and filtering also scale with camera count but slight less quickly.}
     \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/execution_time_breakdown_cams.pdf}
-    \end{figure}
+    \begin{widepage}
+      \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{figures/execution_time_breakdown_cams.pdf}
+      \end{figure}
+    \end{widepage}
   \end{items}
 \end{frame}
 
@@ -421,10 +405,12 @@ tracks n COCO19 format.}
       \sitem {\footnotesize Especially large version gives good results.} \\
       \sitem {\footnotesize Small and medium version are not significantly better than nano version.}
     \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/model_comparison_4_cams.pdf}
-    \end{figure}
+    \begin{widepage}
+      \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{figures/model_comparison_4_cams.pdf}
+      \end{figure}
+    \end{widepage}
   \end{items}
 \end{frame}
 
@@ -437,15 +423,17 @@ tracks n COCO19 format.}
       \sitem {\footnotesize Additional views slightly reduce MOTA due to more false positives.} \\
       \sitem {\footnotesize More camera views is more effective than larger model capacity for MPJPE.}
     \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
-    \end{figure}
+    \begin{widepage}
+      \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
+      \end{figure}
+    \end{widepage}
   \end{items}
 \end{frame}
 
 \begin{frame}
-\frametitle{Quantitative Results -- Skeletal Constraints}
+\frametitle{Quantitative Results -- Skeletal Constraints and Learning}
   \begin{items}
     \begin{oitem}{\litem}
       Main Finding: \\
@@ -453,26 +441,12 @@ tracks n COCO19 format.}
       \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
       \sitem {\footnotesize Id ut nihil aut et numquam.}
     \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
-    \end{figure}
-  \end{items}
-\end{frame}
-
-\begin{frame}
-\frametitle{Quantitative Results -- Learned Parameters}
-  \begin{items}
-    \begin{oitem}{\litem}
-      Main Finding: \\
-      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
-      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
-      \sitem {\footnotesize Id ut nihil aut et numquam.}
-    \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
-    \end{figure}
+    \begin{widepage}
+      \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{figures/improvements_comparison_4_cams.pdf}
+      \end{figure}
+    \end{widepage}
   \end{items}
 \end{frame}
 

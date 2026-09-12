@@ -12,13 +12,13 @@ This section of the report will present the evaluation results obtained by the d
   \begin{tabular}{|r|r|c|c|c|c|c|c|c|}
   \hline
     Model & \# Cameras & Detection & Matching & EKF Update & EKF Prediction & Total \\ \hline
-    \multirow{4}{*}{YOLO26n-pose}  & 4 & 0.0445 & 0.0166 & 0.0080 & 0.0005 & 0.0697 \\ \cline{2-7}
-      & 8 & 0.0840 & 0.0313 & 0.0127 & 0.0006 & 0.1288 \\ \cline{2-7}
-      & 12 & 0.1324 & 0.0431 & 0.0165 & 0.0006 & 0.1929 \\ \cline{2-7}
-      & 16 & 0.1805 & 0.0567  & 0.0210 & 0.0007 & 0.2592 \\ \hline \hline
-    YOLO26s-pose & 4 & 0.0876 & 0.0178 & 0.0083 & 0.0005 & 0.1145 \\ \hline
-    YOLO26m-pose & 4 & 0.2519 & 0.0177 & 0.0083 & 0.0005 & 0.2786 \\ \hline
-    YOLO26l-pose & 4 & 0.2613 & 0.0177 & 0.0083 & 0.0005 & 0.2879 \\ \hline
+    \multirow{4}{*}{YOLO26n-pose}  & 4 & 0.0411 & 0.0131 & 0.0069 & 0.0005 & 0.0616 \\ \cline{2-7}
+      & 8 & 0.0850 & 0.0236 & 0.0102 & 0.0007 & 0.1195 \\ \cline{2-7}
+      & 12 & 0.1403 & 0.0280 & 0.0118 & 0.0008 & 0.1809 \\ \cline{2-7}
+      & 16 & 0.1922 & 0.0355  & 0.0163 & 0.0008 & 0.2448 \\ \hline \hline
+    YOLO26s-pose & 4 & 0.1137 & 0.0139 & 0.0083 & 0.0007 & 0.1365 \\ \hline
+    YOLO26m-pose & 4 & 0.2866 & 0.0140 & 0.0087 & 0.0007 & 0.3100 \\ \hline
+    YOLO26l-pose & 4 & 0.3408 & 0.0143 & 0.0090 & 0.0007 & 0.3648 \\ \hline
   \end{tabular}
   \caption{Average per-frame runtime of the tracking system for different camera and model configurations. Times are given in seconds.}
   \label{fig:perf}
@@ -38,14 +38,14 @@ With the fastest configuration tested, the system achieves only around 14.3 fps.
   \centering
   \begin{tabular}{|r|r|c|c|c|c|c|}
   \hline
-    Model & \# Cameras & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline
-    \multirow{4}{*}{YOLO26n-pose} & 4 & 0.950 & 5.004 & 5.439 & 0.974 & 0.975 \\ \cline{2-7}
-      & 8 & \textbf{0.960} & 2.912 & 2.967 & 0.966 & 0.997 \\ \cline{2-7}
-      & 12 & 0.956 & 2.795 & 2.845 & 0.963 & 0.998 \\ \cline{2-7}
-      & 16 & 0.948 & \textbf{2.515} & \textbf{2.576} & 0.955 & \textbf{0.998} \\ \hline \hline
-    YOLO26s-pose & 4 & 0.953 & 4.957 & 5.427 & 0.974 & 0.979 \\ \hline
-    YOLO26m-pose & 4 & 0.954 & 4.745 & 5.318 & 0.975 & 0.980 \\ \hline
-    YOLO26l-pose & 4 & \textbf{0.960} & 4.252 & 4.554 & \textbf{0.977} & 0.983 \\ \hline
+    Model & \# Cameras & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline \hline
+    \multirow{4}{*}{YOLO26n-pose} & 4 & 0.781 & 5.488 & 8.250 & 0.890 & 0.890 \\ \cline{2-7}
+      & 8 & 0.924 & 3.235 & 3.341 & 0.939 & 0.994 \\ \cline{2-7}
+      & 12 & \textbf{0.926} & 3.066 & 3.146 & \textbf{0.939} & 0.996 \\ \cline{2-7}
+      & 16 & 0.920 & \textbf{2.749} & \textbf{2.834} & 0.934 & \textbf{0.996} \\ \hline \hline
+    YOLO26s-pose & 4 & 0.785 & 5.151 & 8.616 & 0.888 & 0.899 \\ \hline
+    YOLO26m-pose & 4 & 0.807 & 4.976 & 7.466 & 0.897 & 0.913 \\ \hline
+    YOLO26l-pose & 4 & 0.809 & 4.792 & 7.674 & 0.898 & 0.915 \\ \hline
   \end{tabular}
   \caption{Evaluation results for different camera and model configurations. MOTA, MOTP, Precision, and Recall have been computed with an average of 15 centimeters Euclidean distance as the matching threshold. MOTP and MPJPE are given as mean per-joint Euclidean distance in centimeters. The best result in each column is highlighted in bold.}
   \label{fig:eval-results}
@@ -57,18 +57,36 @@ With the fastest configuration tested, the system achieves only around 14.3 fps.
   \centering
   \begin{tabular}{|r|c|c|c|c|c|}
   \hline
-    Scene & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline
-    \inlinecode{160224_haggling1} & 0.862 & 4.004 & 5.007 & 0.900 & 0.972 \\ \hline
-    \inlinecode{161029_build1} & 0.951 & 4.086 & 4.367 & 0.976 & 0.975 \\ \hline
-    \inlinecode{161029_piano4} & 0.998 & 3.395 & 3.395 & 0.998 & 1.000 \\ \hline
-    \inlinecode{170915_office1} & 0.993 & 4.151 & 4.178 & 0.996 & 0.997 \\ \hline
-    \inlinecode{171204_pose6} & 0.967 & 3.779 & 3.858 & 0.976 & 0.992 \\ \hline
+    Scene & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline \hline
+    \inlinecode{160224_haggling1} & 0.861 & 3.974 & 4.961 & 0.900 & 0.971 \\ \hline
+    \inlinecode{160906_ian1} & 0.607 & 4.758 & 9.149 & 0.779 & 0.839 \\ \hline
+    \inlinecode{160906_pizza1} & 0.823 & 5.595 & 8.112 & 0.909 & 0.915 \\ \hline
+    \inlinecode{161029_build1} & 0.950 & 4.070 & 4.363 & 0.976 & 0.974 \\ \hline
+    \inlinecode{161029_sports1} & 0.631 & 4.291 & 9.278 & 0.783 & 0.869 \\ \hline
+    \inlinecode{170221_haggling_m3} & 0.943 & 3.869 & 4.198 & 0.960 & 0.984 \\ \hline
+    \inlinecode{170915_office1} & 0.994 & 4.114 & 4.136 & 0.997 & 0.998 \\ \hline
+    \inlinecode{171026_pose3} & 0.993 & 2.993 & 3.035 & 0.995 & 0.997 \\ \hline
   \end{tabular}
-  \caption{Evaluation results for different scenes averaged over all performed evaluations. Evaluation metrics have been calculates as in \cref{fig:eval-results}.}
+  \caption{Evaluation results for different scenes averaged over all performed evaluations. Evaluation metrics have been calculates as described in \cref{fig:eval-results}.}
   \label{fig:eval-by-scene}
 \end{table*}
 
 % TODO add result of the impact of the skeletal constraints and the learned components.
+\begin{table*}[!ht]
+  \centering
+  \begin{tabular}{|r|c|c|c|c|c|}
+  \hline
+    Configuration & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline \hline
+    Baseline & 0.781 & 5.488 & 8.250 & 0.890 & 0.890 \\ \hline
+    Constraints & 0.842 & 5.139 & 7.264 & 0.920 & 0.923 \\ \hline
+    Learned Kalman & 0.880 & 4.679 & 5.801 & 0.937 & 0.944 \\ \hline
+    Custom YOLO & 0.886 & \textbf{3.788} & 5.318 & 0.941 & 0.946 \\ \hline
+    LK + CY & 0.893 & 4.083 & 5.184 & 0.944 & \textbf{0.950} \\ \hline
+    Tuned & \textbf{0.897} & 3.840 & \textbf{4.917} & \textbf{0.948} & 0.949 \\ \hline
+  \end{tabular}
+  \caption{Evaluation results for configurations of the system. All values are given for a setup with four cameras and the YOLO26n-pose model. Evaluation metrics have been calculates as described in \cref{fig:eval-results}. The best result in each column is highlighted in bold.}
+  \label{fig:eval-by-config}
+\end{table*}
 
 \begin{figure*}[ht!]
   \centering
