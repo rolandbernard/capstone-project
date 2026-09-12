@@ -112,11 +112,18 @@ By implementing the skeletal constraints as described above, the length values s
 
 \subsection{Learning Parameters from Data} \label{arch-learning}
 
+Up until now the system has been described in terms of algorithms are configured using parameters, such as the dynamics and process noise matrices in the Kalman filter, the parameters for the observation noise computation in the YOLO-based detector, or the different thresholds using by the association in the tracking system. While these values can be chosen from intuition and tuned manually, it would be desirable to be able to learn the appropriate parameters directly from data. This project makes use of the CMU Panoptic dataset as described in \cref{dataset-desc}. Since this dataset contains both video from calibrated cameras as well ground truth pose annotation, it can be used from learning the parameters of the system and this was attempted in this project. A subset of 8 sequences has been selected for use in the evaluation of the resulting system. These test sequences where excluded from the training set, while the remaining scenes were used for training.
+
+Ideally, the system would be trained end-to-end, such that all parts of the system would be able to adapt to the characteristics of the others. However, training the full tracking system end-to-end, including the YOLO models, would not only be computationally expensive, it also faces some additional issues. First, the tracking system is not fully differentiable. For example, the matching algorithm in the association steps are not differentiable and depend on non-differentiable thresholds. Further, while this non-differentiability may be accepted, training the system end-to-end would also lead to very unstable training, since the gradient flowing through multiple iteration of the Kalman filter prediction and update step, as well as through the observation function can easily vanish or explode.
+
+Since end-to-end training is not easy to realize, this project instead opts to train components separately. Three different targets are identified for learning in this work. First, a custom YOLO head is trained that can predict directly not only the location of keypoints, but also a covariance matrix representing the confidence in the keypoint location predictions. Second, the parameters of the Kalman filter are learned. Finally, the thresholds for the association in the tracking system are tuned.
 
 
 \subsubsection{Custom YOLO Output Head} \label{yolo-head}
 
-% TODO
+The YOLO26 family of models used for 2D pose estimation in this project perform well at detecting persons and predicting the location of visible keypoints. However, for the integration in the Kalman filter based tracking system there are two major drawbacks of the standard pretrained model. First, the model does not natively output its confidence in the keypoint location predictions. It only outputs a visibility score that represents whether the keypoint is visible or not. While one may naively assume that this score could be transformed into an uncertainty score, this is not without drawbacks since not all visible or invisible keypoints have the same uncertainty. The second limitation of the standard YOLO models is that they no not even attempt to guess at the location of invisible keypoints. Instead, the keypoint locations returned by the model for invisible keypoints are largely not meaningful. However, in many situations it would be possible to make some educated guess about the location of the keypoints, even if with large uncertainty, which would lead to improved tracking performance.
+
+
 
 \subsubsection{Learning the Kalman Filter} \label{learned-kalman}
 
