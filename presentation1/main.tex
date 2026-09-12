@@ -234,18 +234,29 @@
 \begin{frame}
 \frametitle{Skeletal Constraints}
   \begin{items}
-    % TODO
     \begin{oitem}{\litem}
       Summary: \\
-      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
-      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
-      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
-      \sitem {\footnotesize Id ut nihil aut et numquam.}
+      \sitem {\footnotesize Assume limb lengths do not change and are left-right symmetrical.} \\
+      \sitem {\footnotesize Adding length values to the state vector of the filter.} \\
+      \sitem {\footnotesize No direct interaction with other state values and very low process noise.} \\
+      \sitem {\footnotesize Pseudo-observation merged into each update step that observes constraint violation of 0.}
     \end{oitem}
-    \begin{figure}
-      \centering
-      \includegraphics[width=\linewidth]{figures/camera_count_comparison.pdf}
-    \end{figure}
+    \begin{columns}[c]
+      \begin{column}{0.85\textwidth}
+        \begin{align*}
+            \mathbf{x} &= \begin{bmatrix} \mathbf{p}_1^T, \; \dots, \; \mathbf{p}_{17}^T, \; \mathbf{v}_1^T, \; \dots, \; \mathbf{v}_{17}^T, \; l_1, \; \dots, \; l_{12} \end{bmatrix}^T
+        \end{align*}
+        \begin{align*}
+            h_\mathrm{sc}(\mathbf{x}) &= \begin{bmatrix} \rho_1(\mathbf{x}) & \rho_2(\mathbf{x}) & \dots & \rho_{20}(\mathbf{p}) \end{bmatrix}^T
+        \end{align*}
+        \begin{align*}
+            \rho_j(\mathbf{x}) &= \|\mathbf{p}_{a_j} - \mathbf{p}_{b_j}\|_2 - l_{i_j} \quad \quad \quad \mathbf{z}_\mathrm{sc} = 0
+        \end{align*}
+      \end{column}
+      \begin{column}{0.15\textwidth}
+        \includegraphics[width=0.7\linewidth]{figures/skeleton.pdf}
+      \end{column}
+    \end{columns}
   \end{items}
 \end{frame}
 
@@ -255,10 +266,10 @@
     % TODO
     \begin{oitem}{\litem}
       Summary: \\
-      \sitem {\footnotesize Ipsum laborum incidunt consequatur nobis.} \\
-      \sitem {\footnotesize Consequuntur repudiandae non odio sunt consequatur alias.} \\
-      \sitem {\footnotesize Magni esse et non quas eveniet molestias quidem aut.} \\
-      \sitem {\footnotesize Id ut nihil aut et numquam.}
+      \sitem {\footnotesize Learning the complete pipeline end-to-end unfeasible.} \\
+      \sitem {\footnotesize Split the learning into three independent parts that are learned separately.} \\
+      \sitem {\footnotesize Training is done using the CMU Panoptic dataset excluding sequences used for testing.} \\
+      \sitem {\footnotesize Se.}
     \end{oitem}
     \begin{figure}
       \centering
