@@ -3,47 +3,44 @@
 
 \section{Methodology} \label{methodology}
 
-This section of the report will go into detail about the internal implementation of the tracking system.
+This section of the report gives an overview of the developed system architecture and details the internal implementation of its different components.
 
 
 \subsection{Architecture Overview} \label{arch-overview} \label{arch}
 
-\Cref{fig:architecture} show the overall pipeline used in this projects tracking algorithm. The core of the tracking pipeline runs a recursive estimation loop on incoming multi-view video frames. The input to the system is a number of synchronized multi-view video feeds, and the final result is a 3D representation of the skeletal joint of each person in the scene.
+\Cref{fig:architecture} show the overall pipeline used in this projects tracking system. The core of the tracking pipeline runs a recursive estimation loop on incoming multi-view video frames. The input to the system is a number of synchronized multi-view video feeds, and the final result is a 3D representation of the skeletal joint of each person in the scene.
 
-First, multi-view videos are passed through the YOLO detection network, yielding 2D bounding boxes and keypoints. Concurrently, the tracking module predicts the current 3D state of all previously known tracks based on continuous physics models. The keypoints of the predicted tracks are projected into the 2D camera planes and matched against the newly observed 2D detections. Detections matched to existing tracks trigger an extended Kalman filer update for the matched track to refine its 3D state. Unmatched, novel 2D detections matched between views, and if at least two views contain the new target, triangulated to instantiate new 3D tracks. Finally, updated tracks and newly created tracks are merged, and the loop repeats for the next timestamp.
+First, multi-view videos are passed through the YOLO-based detection network, yielding 2D bounding boxes and keypoints. Concurrently, the tracking module predicts the current 3D state of all previously known tracks based on a continuous physics models. The keypoints of the predicted tracks are projected into the 2D camera planes and matched against the newly observed 2D detections. Detections matched to existing tracks trigger an extended Kalman filer update for the matched track to refine its 3D state. Novel 2D detections are matched between views, and triangulated to instantiate new 3D tracks if at least two views contain the new target. Finally, updated tracks and newly created tracks are merged, and the loop repeats for the next timestamp.
 
 
 \subsection{2D Detections and Uncertainty Estimation} \label{arch-detect}
 
-% TODO explain that the computation of sigma here is the non-learned version
-During inference, images from each active camera view are batched and passed to the YOLO26-pose detector using PyTorch \parencite{paszke2019pytorch,ansel2024pytorch}. The detector outputs 2D keypoint positions along with visibility confidence scores $c_k \in [0, 1]$. As a first filter we select only detections that have a confidence above $\tau_{obj}$. Further, we filter out any detections for which fewer than $N_{kpt}$ are visible with a confidence above $\tau_{kpt}$. However, for performing the Kalman filter updates we need a probabilistic framework in which we model the prediction uncertainty as Gaussian noise. This need can not be satisfied by the confidence score alone. To estimate the measurement noise covariance dynamically from the outputs of the YOLO model, the system relies on bounding box and visibility scaling. The variance $\sigma_k^2$ for each detected keypoint $k$ is computed dynamically based on the bounding box magnitude and the joint visibility confidence. The specific formulation used is:
+During inference, images from each active camera view are batched and passed to the YOLO26-pose detector using PyTorch \parencite{paszke2019pytorch,ansel2024pytorch}. The standard detector outputs 2D keypoint positions along with visibility confidence scores $c_k \in [0, 1]$. As a first filter we select only detections that have a confidence above $\tau_{obj}$. Further, we filter out any detections for which fewer than $N_{kpt}$ are visible with a confidence above $\tau_{kpt}$. However, for performing the Kalman filter updates we need a probabilistic framework in which we model the prediction uncertainty as Gaussian noise. This need can not be satisfied by the confidence score alone. \cref{yolo-head} describes how a custom YOLO head has been trained for directly outputting this uncertainty. However, for the baseline configuration of the system a more simple approach has been taken. To estimate the measurement noise covariance dynamically from the outputs of the YOLO model, the system relies on bounding box and visibility scaling. The variance $\sigma_k^2$ for each detected keypoint $k$ is computed dynamically based on the bounding box magnitude and the joint visibility confidence. The specific formulation used is:
 \begin{align*}
     \sigma_k^2 &= \sigma_{min}^2 + d_{bb}^2 \cdot \left( \frac{\sigma_{vis}^2}{\max(0, \bar{c}_k) + \frac{\sigma_{vis}^2}{\sigma_{inv}^2}} \right)
 \end{align*}
-where $\bar{c}_k = \frac{c_k - \tau_{kpt}}{1.0 - \tau_{kpt}}$ is the confidence score normalized above the tuned keypoint threshold $\tau_{kpt}$, $d_{bb}^2$ is the length of the diagonal of the bounding box, and $\sigma_{min}, \sigma_{vis}, \sigma_{inv}$ are tuning parameters specifying respectively the minimum variance, minimum bounding box dependent variance, and maximum bounding box dependent variance. This ensures that occluded joints are appropriately penalized with high uncertainty while visible joint get a lower variance. The keypoint detections are assumed to all be independent, so the final measurement noise covariance matrix is build by filling the diagonals.
+where $\bar{c}_k = \frac{c_k - \tau_{kpt}}{1.0 - \tau_{kpt}}$ is the confidence score normalized above the tuned keypoint threshold $\tau_{kpt}$, $d_{bb}^2$ is the length of the diagonal of the bounding box, and $\sigma_{min}, \sigma_{vis}, \sigma_{inv}$ are tuning parameters specifying respectively the minimum variance, minimum bounding box dependent variance, and maximum bounding box dependent variance. This ensures that occluded joints are appropriately penalized with high uncertainty while visible joint get a lower variance. The keypoint detections are assumed to all be independent, so the final measurement noise covariance matrix is build as a diagonal matrix.
 
 Further, before passing the resulting 2D keypoints to the rest of the tracking system, the 2D pixel coordinates are transformed into normalized camera coordinates utilizing the camera intrinsics and distortion coefficients as follows:
 \begin{align*}
     \mathbf{x}_{pixel} &= \begin{bmatrix} u \\ v \end{bmatrix} \xrightarrow{\mathbf{K}^{-1}} \mathbf{x}_{distorted} \xrightarrow{\text{Iterative Undistortion}} \mathbf{x}_{normalized}
 \end{align*}
-To maintain consistent uncertainty representation, we also transform the observation covariance matrix $\Sigma_{pixel}$ for the 17 keypoints into normalized space using the following approximation:
+To maintain consistent uncertainty representation, we also transform the observation covariance matrix $\Sigma_{pixel}$ for the 17 keypoints into normalized space using the following first-order approximation:
 \begin{align*}
     \Sigma_{norm} &\approx K^{-1} \Sigma_{pixel} K^{-T}
 \end{align*}
-The main motivation behind this approach is that it simplifies the triangulation for new tracks as well as the observation process modeling in the Kalman filter update for old tracks by removing the non-linear distortion effects. As an additional benefit, it becomes more efficient to compute not only the Kalman filter updates but also the computation of cost matrices for the association step, which need to perform projection from the internal 3D state.
+The main motivation behind this approach is that it simplifies the triangulation for new tracks as well as the observation process modeling in the Kalman filter update for old tracks by removing the non-linear distortion effects. As an additional benefit, it becomes more efficient to compute not only the Kalman filter updates but also the computation of cost matrices for the association step, which need to perform projection from the internal 3D state. An alternative approach that achieves a similar trade-off is to remove distortion from images before they are passed to the detection model.
 
 
 \subsection{State Representation and Kalman Filtering} \label{arch-filter}
 
-% TODO explain that the representation here is the one without constraints or learning
 In the Kalman filter implementation of the project, the state for each person is tracked separately. The state vector is composed by modeling the human pose as a collection of 17 keypoints. The state vector $\mathbf{x} \in \mathbb{R}^{102}$ encapsulates the 3D coordinates and the 3D velocities for all 17 keypoints resulting in a state vector shaped as:
 \begin{align*}
     \mathbf{x} &= \begin{bmatrix} \mathbf{p}_1^T, \; \dots, \; \mathbf{p}_{17}^T, \; \mathbf{v}_1^T, \; \dots, \; \mathbf{v}_{17}^T \end{bmatrix}^T
 \end{align*}
-where $\mathbf{p}_k = [x_k, y_k, z_k]^T \in \mathbb{R}^3$ and $\mathbf{v}_k = [\dot{x}_k, \dot{y}_k, \dot{z}_k]^T \in \mathbb{R}^3$ are the 3D position and velocity vectors for keypoint $k$.
+where $\mathbf{p}_k = [x_k, y_k, z_k]^T \in \mathbb{R}^3$ and $\mathbf{v}_k = [\dot{x}_k, \dot{y}_k, \dot{z}_k]^T \in \mathbb{R}^3$ are the 3D position and velocity vectors for keypoint $k$. Note that this is the state representation for the baseline configuration, while \cref{arch-constraints} explains how the state is modified for the introduction of skeletal constraints.
 
-% TODO explain that the dynamics here are the ones without constraints or learning
-The state dynamics are modeled by a continuous-time linear velocity process. The decision was made to specify the dynamics in the continuous domain in order to be able to handle variable frame rates which could for example arise due to frames being dropped during computationally more demanding scenes. The continuous dynamics matrix $\mathbf{F}$ and process noise $\mathbf{Q}$ are mapped to discrete time steps $\Delta t_i$ dynamically for each frame $i$ using a second-order Taylor expansion based approximation:
+In the baseline system the state dynamics are modeled by a linear velocity process. \Cref{learned-kalman} discusses how this is modified for the learned Kalman filter. In either case, the dynamics are models in continuous time. The decision was made to specify the dynamics in the continuous domain in order to be able to handle variable frame rates which could for example arise due to frames being dropped during computationally more demanding scenes. The continuous dynamics matrix $\mathbf{F}$ and process noise $\mathbf{Q}$ are mapped to discrete time steps $\Delta t_i$ dynamically for each frame $i$ using a second-order Taylor expansion based approximation:
 \begin{align*}
     \mathbf{F}_k &\approx \mathbf{I} + \mathbf{F} \Delta t_i + \frac{1}{2} \mathbf{F}^2 \Delta t_i^2 \\
     \mathbf{Q}_k &\approx \mathbf{Q} \Delta t_i + \frac{1}{2} (\mathbf{F} \mathbf{Q} + \mathbf{Q} \mathbf{F}^T) \Delta t_i^2
@@ -62,32 +59,32 @@ Because multiple cameras observe the target simultaneously, the system concatena
     \mathbf{z}_{merged} &= \begin{bmatrix} \mathbf{z}_1^T \vdots \mathbf{z}_M^T \end{bmatrix}^T \in \mathbb{R}^{34M} \\
     \Sigma_{merged} &= \text{diag}(\Sigma_1, \dots, \Sigma_M) \in \mathbb{R}^{34M \times 34M}
 \end{align*}
-This formulation can handle asynchronous data naturally by simply omitting cameras without active detections.
+This formulation can handle targets visible by a subset of cameras naturally by simply omitting cameras without active detections. Note that, as is described in \cref{arch-constraints}, the pseudo-observations implementing the skeletal constraints are also merged identically into the single update step.
 
-Because the projection mapping is non-linear, the extended Kalman filter requires the computation of the Jacobian $\mathbf{H}_i \in \mathbb{R}^{34M \times 102}$. Rather than deriving and hard-coding this computation analytically, the system leverages the automatic differentiation capabilities of PyTorch \parencite{paszke2019pytorch,ansel2024pytorch} to compute the exact measurement Jacobian dynamically at runtime.
+Because the projection mapping and the skeletal constraint observations are both non-linear, the extended Kalman filter requires the computation of the Jacobian $\mathbf{H}_i \in \mathbb{R}^{34M \times 102}$ to linearize them. Rather than deriving and hard-coding this computation analytically, the system leverages the automatic differentiation capabilities of PyTorch \parencite{paszke2019pytorch,ansel2024pytorch} to compute the exact measurement Jacobian dynamically at runtime.
 
 
 \subsection{Data Association} \label{arch-assoc}
 
-Data association is performed in two separate steps. First, the detections for in view are matched against the existing 3D track predictions. This is performed independently for each view. Next, all detections that were not matched to any of the existing tracks must be matched between views in order to find opportunities for triangulation.
+Data association is performed in two separate steps. First, the detections for each view are matched against the existing 3D track predictions. This is performed independently for each view. Next, all detections that were not matched to any of the existing tracks must be matched between views in order to find opportunities for triangulation.
 
-The association between detections and existing tracks is performed independently for each view by first projecting the prediction to the 2D camera plane. Note that we also project the 3D covariances using the first-order approximation using the Jacobian. A cost matrix is populated between projected predictions and YOLO derived detections. The distance metric is a modified Mahalanobis distance that adds the log-determinant of the combined covariance to discourage highly uncertain matches with low statistical power:
+The association between detections and existing tracks is performed independently for each view by first projecting the prediction to the 2D camera plane. Note that we also project the 3D covariances by means of a first-order approximation using the Jacobian. A cost matrix is populated between projected predictions and YOLO derived detections. The distance metric is a modified Mahalanobis distance that adds the log-determinant of the combined covariance to discourage highly uncertain matches with low statistical power:
 \begin{align*}
     d_\Sigma(\mathbf{z}, \hat{\mathbf{z}}) &= (\mathbf{z} - \hat{\mathbf{z}})^T \Sigma^{-1} (\mathbf{z} - \hat{\mathbf{z}}) \\
     C_{i,j} &= d_{\Sigma_{pred} + \Sigma_{obs}}(\mathbf{z}, \hat{\mathbf{z}}) + \log|\Sigma_{pred} + \Sigma_{obs}|  - N_{dim} \theta_{mo}
 \end{align*}
 where $N_{dim} = 34$, and $\theta_{mo}$ is a threshold parameter. Note that we fill the cost matrix with zero padding to allow for unmatched tracks or detections. The optimal association is found by solving this cost matrix using the Hungarian algorithm  \parencite{kuhn1955hungarian} via the SciPy library \parencite{virtanen2020scipy} implementation. This process can be interpreted as an implementation of maximum likelihood based model selection amongst all possible associations.
 
-Detections that are not matched to existing tracks by the above method may belong to new people entering the scene. Since these detections lack 3D track priors, we must match them across different camera views. To achieve this goal, this project employs an iterative greedy-optimal matching approach to associate 2D detections across views. The algorithm works by first building associations between the first two views, then iteratively adding views. During the iterative addition step we compute a cost matrix and solve for the optimal association using the Hungarian algorithm in an effort to minimize the reprojection error:
+Detections that are not matched to existing tracks by the above method may belong to new people entering the scene. Since these detections lack 3D track priors, we must match them across the different camera views. To achieve this goal, this project employs an iterative greedy-optimal matching approach to associate 2D detections across views. The algorithm works by first building associations between the first two views, then iteratively adding views. During the iterative addition step we compute a cost matrix and solve for the optimal association using the Hungarian algorithm with the objective to minimize the reprojection error:
 \begin{align*}
     C_{cross} &= \frac{1}{K}\sum_{k=1}^K \left( d_{\Sigma_k}(\mathbf{z}_k, \pi_k(\mathbf{X}_{3D})) + \ln|\Sigma_k| \right) - N_{dim}\theta_{mn}
 \end{align*}
-where $\mathbf{X}_{3D}$ is the triangulated 3D point from the $K$ associated views, and $\theta_{mn}$ is the new-track association threshold. Detections matched in at least two views are grouped to initialize a new track via triangulation.
+where $\mathbf{X}_{3D}$ is the triangulated 3D point from the $K$ associated views, and $\theta_{mn}$ is the new-track association threshold. Detections matched across at least two views are used to initialize new tracks via triangulation.
 
 
 \subsection{Track Creation and Deletion} \label{arch-tracks}
 
-To prevent spurious detections from creating false tracks, we manage the lifecycle of each track using a state machine. New tracks that have just been added via triangulation of detections start out as tentative tracks.  If a tentative track is not matched to at least one detection in the next frame, it is deleted immediately. Once a tentative track have been observed for $\ge N_{age}$ consecutive frames, it is promoted to an active tracks. Active tracks are more robust to occasional missing detections. If an active track is not observed, its state is updated only using the Kalman filter prediction step. However, if it remains unmatched for more than $N_{inv}$ consecutive frames, it is deleted.
+To prevent spurious detections from creating false tracks, the lifecycle of each track is managed using a state machine. New tracks that have just been added via triangulation of detections start out as tentative tracks. If a tentative track is not matched to at least one detection in the next frame, it is deleted immediately. Once a tentative track have been observed for $\ge N_{age}$ consecutive frames, it is promoted to an active tracks. Active tracks are more robust to occasional missing detections. If an active track is not observed, its state is updated only using the Kalman filter prediction step and if enabled using skeletal constraints as described in \cref{arch-constraints}. However, if it remains unmatched for more than $N_{inv}$ consecutive frames, it is deleted.
 
 
 \subsection{Skeletal Constraints} \label{arch-constraints}
