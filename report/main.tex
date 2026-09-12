@@ -6,7 +6,7 @@
 \usepackage{sectsty, csquotes, xcolor, xspace, setspace, listings}
 \usepackage{graphicx, tabularx, changepage, multirow, subcaption}
 \usepackage{algorithm, algpseudocode, multicol, cuted, colortbl}
-\usepackage{makecell, supertabular}
+\usepackage{makecell, supertabular, xpatch}
 \usepackage[hidelinks,bookmarksdepth=3]{hyperref}
 \usepackage[capitalise]{cleveref}
 \usepackage[inline]{enumitem}
@@ -19,6 +19,16 @@
 \usepackage{tikz}
 
 \usetikzlibrary{fit, shapes.geometric, shapes.symbols, positioning, shapes.misc, calc, arrows.meta, patterns, backgrounds, decorations, decorations.markings, decorations.pathreplacing, shadows, hobby, decorations.pathmorphing}
+
+\xpatchbibmacro{cite}
+ {\printnames{labelname}}
+ {\printtext[bibhyperref]{\printnames{labelname}}}
+ {}{}
+
+\xpatchbibmacro{textcite}
+ {\printnames{labelname}}
+ {\printtext[bibhyperref]{\printnames{labelname}}}
+ {}{}
 
 \makeatletter
 
