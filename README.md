@@ -1,5 +1,5 @@
-Markerless Multi-Person 3D Human Pose Tracking
-==============================================
+Markerless 3D Human Pose Tracking
+=================================
 
 ## Key Project Deliverables
 
@@ -50,6 +50,8 @@ Below is an example of the results on one of the CMU Panoptic sequences that was
 ![Example Output](report/figures/output.gif)
 
 In addition to the CMU Panoptic dataset, for some qualitative analysis and demos also the [SALSA Dataset](https://tev.fbk.eu/resources/salsa) has been used. This dataset represents a much more difficult situation but since it does not contain any ground truth annotations for pose estimation, it could not be used for the quantitative evaluations.
+
+> Alameda-Pineda, Xavier, et al. "Salsa: A novel dataset for multimodal group behavior analysis." IEEE transactions on pattern analysis and machine intelligence 38.8 (2015): 1707-1720.
 
 ### Project Structure
 
