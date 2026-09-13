@@ -67,6 +67,40 @@ Due to computational and time constraints, running the tracking system across al
 
 In addition to the CMU Panoptic dataset, for some qualitative analysis and demos also the SALSA dataset \parencite{alameda2015salsa} has been used. This dataset represents a much more difficult scenario for the system, however, because it does not contain any ground truth pose annotations, it could not be used for the quantitative evaluations.
 
+\begin{table*}[!ht]
+  \centering
+  \begin{tabular}{|r|r|c|c|c|c|c|c|c|}
+  \hline
+    Model & \# Cameras & Detection & Matching & EKF Update & EKF Prediction & Total \\ \hline
+    \multirow{4}{*}{YOLO26n-pose}  & 4 & 0.0411 & 0.0131 & 0.0069 & 0.0005 & 0.0616 \\ \cline{2-7}
+      & 8 & 0.0850 & 0.0236 & 0.0102 & 0.0007 & 0.1195 \\ \cline{2-7}
+      & 12 & 0.1403 & 0.0280 & 0.0118 & 0.0008 & 0.1809 \\ \cline{2-7}
+      & 16 & 0.1922 & 0.0355  & 0.0163 & 0.0008 & 0.2448 \\ \hline \hline
+    YOLO26s-pose & 4 & 0.1137 & 0.0139 & 0.0083 & 0.0007 & 0.1365 \\ \hline
+    YOLO26m-pose & 4 & 0.2866 & 0.0140 & 0.0087 & 0.0007 & 0.3100 \\ \hline
+    YOLO26l-pose & 4 & 0.3408 & 0.0143 & 0.0090 & 0.0007 & 0.3648 \\ \hline
+  \end{tabular}
+  \caption{Average per-frame runtime of the tracking system for different camera and model configurations. Times are given in seconds.}
+  \label{fig:perf}
+\end{table*}
+
+\begin{table*}[!ht]
+  \centering
+  \begin{tabular}{|r|r|c|c|c|c|c|}
+  \hline
+    Model & \# Cameras & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline \hline
+    \multirow{4}{*}{YOLO26n-pose} & 4 & 0.781 & 5.488 & 8.250 & 0.890 & 0.890 \\ \cline{2-7}
+      & 8 & 0.924 & 3.235 & 3.341 & \textbf{0.939} & 0.994 \\ \cline{2-7}
+      & 12 & \textbf{0.926} & 3.066 & 3.146 & 0.939 & 0.996 \\ \cline{2-7}
+      & 16 & 0.920 & \textbf{2.749} & \textbf{2.834} & 0.934 & \textbf{0.996} \\ \hline \hline
+    YOLO26s-pose & 4 & 0.785 & 5.151 & 8.616 & 0.888 & 0.899 \\ \hline
+    YOLO26m-pose & 4 & 0.807 & 4.976 & 7.466 & 0.897 & 0.913 \\ \hline
+    YOLO26l-pose & 4 & 0.809 & 4.792 & 7.674 & 0.898 & 0.915 \\ \hline
+  \end{tabular}
+  \caption{Evaluation results for the baseline configuration with different camera and model configurations. MOTA, MOTP, Precision, and Recall have been computed with an average of 15 centimeters Euclidean distance as the matching threshold. MOTP and MPJPE are given as mean per-joint Euclidean distance in centimeters. The best result in each column is highlighted in bold.}
+  \label{fig:eval-results}
+\end{table*}
+
 
 \subsection{Evaluation Procedure} \label{eval-proc}
 
