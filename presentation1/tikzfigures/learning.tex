@@ -1,0 +1,37 @@
+\begin{figure}
+  \centering
+  \begin{tikzpicture}[
+    below_label/.style={text width=4.5cm,align=center,inner sep=2pt},
+    arrow_label/.style={midway,sloped,inner sep=2pt},
+    node distance=2.0
+  ]
+    \node [base_node, yshift=6, xshift=6] at (0,0) {\includegraphics[width=15mm]{figures/examples/example1.png}};
+    \node [base_node, yshift=4, xshift=4] at (0,0) {\includegraphics[width=15mm]{figures/examples/example2.png}};
+    \node [base_node, yshift=2, xshift=2] at (0,0) {\includegraphics[width=15mm]{figures/examples/example3.png}};
+    \node [base_node] (video_box) at (0,0) {\includegraphics[width=15mm]{figures/examples/example4.png}};
+
+    \node [base_node, right=0.7 of video_box, yshift=6, xshift=6] {\includegraphics[width=15mm]{figures/examples/example1.png}};
+    \node [base_node, right=0.7 of video_box, yshift=4, xshift=4] {\includegraphics[width=15mm]{figures/examples/example2.png}};
+    \node [base_node, right=0.7 of video_box, yshift=2, xshift=2] {\includegraphics[width=15mm]{figures/examples/example3.png}};
+    \node [base_node, right=0.7 of video_box] (detections_box)  {\includegraphics[width=15mm]{figures/examples/example4_pred.png}};
+    \node[below_label, below=0 of detections_box,xshift=-40] (detections_label) {YOLO};
+  
+    \node[base_node, right=of detections_box] (kf_box) {
+      \includegraphics[width=15mm]{figures/update.pdf}
+    };
+    \node[below_label, below=0 of kf_box] (kf_label) {Kalman Filter};
+
+    \node[base_node, above=0.2 of kf_box] (predict_box) {
+      \includegraphics[width=10mm]{figures/predict.pdf}
+    };
+
+    \node[base_node, right=of kf_box] (match_box) {
+      \includegraphics[width=15mm]{figures/match.pdf}
+    };
+    \node[below_label, below=0 of match_box] (match_label) {Match Thresholds};
+
+    \draw[flow] (video_box) -- (detections_box);
+    \draw[flow] (kf_box.east) -- (predict_box.east);
+    \draw[flow] (predict_box.west) -- (kf_box.west);
+  \end{tikzpicture}
+\end{figure}

@@ -1,0 +1,39 @@
+\begin{figure}
+  \centering
+  \hspace*{-17mm}
+  \begin{tikzpicture}[
+    below_label/.style={text width=4.5cm,align=center,inner sep=2pt},
+    arrow_label/.style={midway,sloped,inner sep=2pt},
+    node distance=1.5
+  ]
+    \node [base_node, yshift=6, xshift=6] at (0,0) {\includegraphics[width=15mm]{figures/examples/example1.png}};
+    \node [base_node, yshift=4, xshift=4] at (0,0) {\includegraphics[width=15mm]{figures/examples/example2.png}};
+    \node [base_node, yshift=2, xshift=2] at (0,0) {\includegraphics[width=15mm]{figures/examples/example3.png}};
+    \node [base_node] (video_box) at (0,0) {\includegraphics[width=15mm]{figures/examples/example4.png}};
+    \node[below_label, below=0 of video_box] (video_label) {Multi-View Videos};
+
+    \node [base_node, right=2.0 of video_box, yshift=6, xshift=6] {\includegraphics[width=15mm]{figures/examples/example1.png}};
+    \node [base_node, right=2.0 of video_box, yshift=4, xshift=4] {\includegraphics[width=15mm]{figures/examples/example2.png}};
+    \node [base_node, right=2.0 of video_box, yshift=2, xshift=2] {\includegraphics[width=15mm]{figures/examples/example3.png}};
+    \node [base_node, right=2.0 of video_box] (detections_box)  {\includegraphics[width=15mm]{figures/examples/example4_pred.png}};
+    \node[below_label, below=0 of detections_box] (detections_label) {Standard Detections};
+
+    \node[base_node, below=of detections_box] (extra_box) {
+      \includegraphics[width=15mm]{figures/extra-head.pdf}
+    };
+    \node[below_label, above=0 of extra_box] (extra_label) {Extra Head};
+
+    \node [base_node, right=2.0 of detections_box, yshift=6, xshift=6] {\includegraphics[width=15mm]{figures/examples/example1.png}};
+    \node [base_node, right=2.0 of detections_box, yshift=4, xshift=4] {\includegraphics[width=15mm]{figures/examples/example2.png}};
+    \node [base_node, right=2.0 of detections_box, yshift=2, xshift=2] {\includegraphics[width=15mm]{figures/examples/example3.png}};
+    \node [base_node, right=2.0 of detections_box] (detections_box_final)  {\includegraphics[width=15mm]{figures/examples/example4_pred.png}};
+    \node[below_label, below=0 of detections_box_final] (detections_label_final) {Detections with Variance};
+
+    \draw[flow] (video_box) -- (detections_box)
+      node[arrow_label, pos=0.5, below] (yolo_label) {YOLO};
+    \draw[flow] (yolo_label) |- (extra_box)
+      node[arrow_label, pos=0.5, below] {Custom Head};
+    \draw[flow] (detections_box) -- (detections_box_final);
+    \draw[flow] (extra_box) -| (detections_label_final);
+  \end{tikzpicture}
+\end{figure}

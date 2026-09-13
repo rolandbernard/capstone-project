@@ -1,0 +1,35 @@
+\begin{figure}
+  \centering
+  \hspace*{-17mm}
+  \begin{tikzpicture}[
+    below_label/.style={text width=4.5cm,align=center,inner sep=2pt},
+    arrow_label/.style={midway,sloped,inner sep=2pt},
+    node distance=1.5
+  ]
+
+    \node[base_node] (merge_box) {
+      \includegraphics[width=15mm]{figures/merged.pdf}
+    };
+    \node[below_label, below=0 of merge_box] (merge_label) {Ground Truth};
+
+    \node[base_node, above right=of merge_box] (predict_box) {
+      \includegraphics[width=10mm]{figures/predict.pdf}
+    };
+    \node[below_label, below=0 of predict_box] (predict_label) {Synthetic Observations};
+
+    \node[base_node, right=of predict_box] (kf_box) {
+      \includegraphics[width=15mm]{figures/update.pdf}
+    };
+    \node[below_label, below=0 of kf_box] (kf_label) {Kalman Filter};
+
+    \node[base_node, right=7 of merge_box] (match_box) {
+      \includegraphics[width=15mm]{figures/match.pdf}
+    };
+    \node[below_label, below=0 of match_box] (match_label) {Compute MSE $\mathcal{L}$};
+
+    \draw[flow] (merge_box) |- (predict_box);
+    \draw[flow] (predict_box) -- (kf_box);
+    \draw[flow] (merge_box) -- (match_box);
+    \draw[flow] (kf_box) -| (match_box);
+  \end{tikzpicture}
+\end{figure}

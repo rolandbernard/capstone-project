@@ -271,6 +271,7 @@
       \sitem {\footnotesize Training is done using the CMU Panoptic dataset excluding sequences used for testing.} \\
       \sitem {\footnotesize Sequences reserved for testing are excluded from the training.}
     \end{oitem}
+    \input{tikzfigures/learning.tex}
   \end{items}
 \end{frame}
 
@@ -286,6 +287,7 @@
       \sitem {\footnotesize Final layer of head is initialized to zero to start training with reasonable values.} \\
       \sitem {\footnotesize Extensive data augmentation is performed to avoid overfitting.}
     \end{oitem}
+    \input{tikzfigures/learning_yolo.tex}
   \end{items}
 \end{frame}
 
@@ -301,6 +303,7 @@
       \sitem {\footnotesize Training by taking 100 frame segments of the ground truth tracks.} \\
       \sitem {\footnotesize Then generating synthetic observations, running filter, and minimizing MSE.}
     \end{oitem}
+    \input{tikzfigures/learning_kalman.tex}
   \end{items}
 \end{frame}
 
