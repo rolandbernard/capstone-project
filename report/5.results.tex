@@ -92,6 +92,27 @@ Next, \cref{fig:eval-by-scene} shows the average performance per scene across pe
 
 Finally, \cref{fig:eval-by-config} shows how different more advanced configurations of the system perform compared to the baseline evaluated above. The MOTA score increases continuously from 0.781 at the baseline to a peak of 0.897 for the fully tuned configuration, representing a 0.116 gain. The largest single jump in MOTA performance comes from the introduction of the skeletal constraints. MPJPE drops from 8.250 down to 4.917 in the tuned setup, constituting a 40.4\% overall error reduction. Here the largest improvement comes from the custom YOLO head. Both learned Kalman and custom YOLO individually provide significant performance gains, with the custom YOLO head providing slightly more performance when used individually. Combining both improves the performance further beyond their individual performance. Tuning the system thresholds yields the top-performing configuration overall, capturing a MOTA score of 0.897 and MPJPE of 4.917.
 
+\begin{figure*}[ht!]
+  \centering
+  \hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/salsa-bad.png}
+    \caption{Example captured without skeletal constrains.}
+    \label{fig:qual-salsa-bad}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/salsa-good.png}
+    \caption{Example captured with skeletal constrains.}
+    \label{fig:qual-salsa-good}
+  \end{subfigure}
+  \hfill
+  \caption{Two example scenes showing the impact of using skeletal constrained for the results obtained on the exact same segment of the SALSA dataset.}
+  \label{fig:qual-salsa}
+\end{figure*}
+
 \subsection{Qualitative Results} \label{qual}
 
 Some qualitative evaluation has also been performed for this project.
@@ -115,5 +136,5 @@ Another commonly observed failure is shown in \cref{fig:qual-single}. When a per
 
 \subsubsection{Impact of the Skeletal Constraints}
 
-% TODO add another figure with SALSA
-% TODO talk about impact of the skeletal constraints
+The addition of skeletal constraints can help significantly improve the tracking performance especially in difficult situation where people are only partially visible. The choice of making the constraints be symmetric also helps in cases where only one side of a person is fully visible. \Cref{fig:qual-salsa} shows a scene from the SALSA dataset. In \cref{fig:qual-salsa-bad} it shows the result obtained when using the baseline configuration of the system, while \cref{fig:qual-salsa-good} shows the exact same scene but with the tracking system configured to use skeletal constraints. It is clearly evident that the skeletal constraints help prevent that individual keypoints of partially occluded people are pulled away from the rest of the skeleton, because in order to do that the limb length would have to increase.
+
