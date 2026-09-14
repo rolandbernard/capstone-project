@@ -263,7 +263,6 @@
 \begin{frame}
 \frametitle{Learning Parameters from Data}
   \begin{items}
-    % TODO
     \begin{oitem}{\litem}
       Summary: \\
       \sitem {\footnotesize Learning the complete pipeline end-to-end unfeasible.} \\
@@ -278,11 +277,10 @@
 \begin{frame}
 \frametitle{Learning Parameters from Data -- Custom YOLO Head}
   \begin{items}
-    % TODO
     \begin{oitem}{\litem}
       Summary: \\
       \sitem {\footnotesize Standard YOLO does not provide uncertainty output and does not predict invisible joints.} \\
-      \sitem {\footnotesize Dataset generated from CMU Panoptic by taining random camera view every second.} \\
+      \sitem {\footnotesize Dataset generated from CMU Panoptic by training random camera view every second.} \\
       \sitem {\footnotesize Custom head outputs $x$ and $y$ offsets as well as covariance matrix.} \\
       \sitem {\footnotesize Final layer of head is initialized to zero to start training with reasonable values.} \\
       \sitem {\footnotesize Extensive data augmentation is performed to avoid overfitting.}
@@ -294,7 +292,6 @@
 \begin{frame}
 \frametitle{Learning Parameters from Data -- Kalman Filter}
   \begin{items}
-    % TODO
     \begin{oitem}{\litem}
       Summary: \\
       \sitem {\footnotesize Used only the annotations of the CMU Panoptic dataset.} \\
@@ -442,7 +439,7 @@ tracks n COCO19 format.}
   \begin{items}
     \begin{oitem}{\litem}
       Main Finding: \\
-      \sitem {\footnotesize Skeletal constrains give a significant boost in MOTA and MPJPE.} \\
+      \sitem {\footnotesize Skeletal constraints give a significant boost in MOTA and MPJPE.} \\
       \sitem {\footnotesize Both learned Kalman and custom YOLO head improve performance.} \\
       \sitem {\footnotesize Tuning thresholds give a small improvement.}
     \end{oitem}
