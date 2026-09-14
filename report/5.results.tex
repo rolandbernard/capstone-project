@@ -13,8 +13,24 @@
     \inlinecode{170915_office1} & 0.994 & 4.114 & 4.136 & 0.997 & 0.998 \\ \hline
     \inlinecode{171026_pose3} & 0.993 & 2.993 & 3.035 & 0.995 & 0.997 \\ \hline
   \end{tabular}
-  \caption{Evaluation results for different scenes averaged over all performed evaluations of the baseline system. Evaluation metrics have been calculates as described in \cref{fig:eval-results}.}
+  \caption{Evaluation results for different scenes averaged over all performed evaluations of the baseline system. Evaluation metrics have been calculated as described in \cref{fig:eval-results}.}
   \label{fig:eval-by-scene}
+\end{table*}
+
+\begin{table*}[!ht]
+  \centering
+  \begin{tabular}{|r|c|c|c|c|c|}
+  \hline
+    Configuration & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline \hline
+    Baseline & 0.781 & 5.488 & 8.250 & 0.890 & 0.890 \\ \hline
+    Constraints & 0.842 & 5.139 & 7.264 & 0.920 & 0.923 \\ \hline
+    Learned Kalman & 0.880 & 4.679 & 5.801 & 0.937 & 0.944 \\ \hline
+    Custom YOLO & 0.886 & \textbf{3.788} & 5.318 & 0.941 & 0.946 \\ \hline
+    LK + CY & 0.893 & 4.083 & 5.184 & 0.944 & \textbf{0.950} \\ \hline
+    Tuned & \textbf{0.897} & 3.840 & \textbf{4.917} & \textbf{0.948} & 0.949 \\ \hline
+  \end{tabular}
+  \caption{Evaluation results for configurations of the system. All values are given for a setup with four cameras and the YOLO26n-pose model. Evaluation metrics have been calculated as described in \cref{fig:eval-results}. The best result in each column is highlighted in bold.}
+  \label{fig:eval-by-config}
 \end{table*}
 
 \section{Results and Discussion} \label{results}
@@ -30,22 +46,6 @@ When adding more camera views to the system using the smallest model, the comput
 When keeping the camera count at 4 but upgrading the YOLO architecture to larger capacity version, it can be observed that the cost increases significantly. Upgrading from YOLO26n-pose to YOLO26s-pose doubles the detection time, going from 0.0411s to 0.1137s. However, jumping to the medium or large version causes a massive spike, tripling the time to over a third of a second. Predictably, only the runtime for the detection step is significantly affected by increasing the model capacity and matching, EKF update, and Prediction remain almost entirely unchanged across all four model variants.
 
 With the fastest configuration tested, the system achieves only around 16.2 fps. This is likely insufficient for real-time applications. However, it should be noted that not much effort has gone into optimization of the implementation, and that the tests were performed on relatively weak integrated GPU hardware.
-
-\begin{table*}[!ht]
-  \centering
-  \begin{tabular}{|r|c|c|c|c|c|}
-  \hline
-    Configuration & MOTA & MOTP & MPJPE & Precision & Recall \\ \hline \hline
-    Baseline & 0.781 & 5.488 & 8.250 & 0.890 & 0.890 \\ \hline
-    Constraints & 0.842 & 5.139 & 7.264 & 0.920 & 0.923 \\ \hline
-    Learned Kalman & 0.880 & 4.679 & 5.801 & 0.937 & 0.944 \\ \hline
-    Custom YOLO & 0.886 & \textbf{3.788} & 5.318 & 0.941 & 0.946 \\ \hline
-    LK + CY & 0.893 & 4.083 & 5.184 & 0.944 & \textbf{0.950} \\ \hline
-    Tuned & \textbf{0.897} & 3.840 & \textbf{4.917} & \textbf{0.948} & 0.949 \\ \hline
-  \end{tabular}
-  \caption{Evaluation results for configurations of the system. All values are given for a setup with four cameras and the YOLO26n-pose model. Evaluation metrics have been calculates as described in \cref{fig:eval-results}. The best result in each column is highlighted in bold.}
-  \label{fig:eval-by-config}
-\end{table*}
 
 \begin{figure*}[ht!]
   \centering
@@ -84,7 +84,7 @@ With the fastest configuration tested, the system achieves only around 16.2 fps.
 
 \subsection{Quantitative Results} \label{quant}
 
-Quantitative results for the baseline system on the chosen test sequences can be found in \cref{fig:eval-results}. When keeping the model fixed to YOLO26n-pose and increasing the number of cameras from 4 to 16, a significant reduction in pose and localization errors can be observed. The joint position error decreases significantly from 8.250 cm down to 2.834 cm. This indicates that incorporating more viewpoints substantially improves 3D localization and pose estimation accuracy. Also, the increase in camera views brings improvements in recall. Recall increases from 0.890 with 4 cameras to 0.996 when using 16 cameras, indicating fewer missed detections likely because the cameras now cover more angles that would otherwise not be visible. Similarly, also precision increases initially when adding more camera views. However, adding even more cameras leads to a decrease in precision from 0.939 for 8 cameras to 0.934 with 16. This can be explained by the fact that more camera views introduce a higher likelihood of false positives and could also indicate limitations in the association algorithm. MOTA hits a sweet spot of 0.926 with 12 cameras for the chosen test sequences. 
+Quantitative results for the baseline system on the chosen test sequences can be found in \cref{fig:eval-results}. When keeping the model fixed to YOLO26n-pose and increasing the number of cameras from 4 to 16, a significant reduction in pose and localization errors can be observed. The joint position error decreases significantly from 8.250 cm down to 2.834 cm. This indicates that incorporating more viewpoints substantially improves 3D localization and pose estimation accuracy. Furthermore, the increase in camera views brings improvements in recall. Recall increases from 0.890 with 4 cameras to 0.996 when using 16 cameras, indicating fewer missed detections likely because the cameras now cover more angles that would otherwise not be visible. Similarly, also precision increases initially when adding more camera views. However, adding even more cameras leads to a decrease in precision from 0.939 for 8 cameras to 0.934 with 16. This can be explained by the fact that more camera views introduce a higher likelihood of false positives and could also indicate limitations in the association algorithm. MOTA hits a sweet spot of 0.926 with 12 cameras for the chosen test sequences. 
 
 In contrast, when keeping the camera count fixed at 4 and scaling up the model complexity from YOLO26n-pose to YOLO26l-pose, we see much smaller improvements when compared to adding additional cameras. The largest model achieves the best overall MOTA of 0.809 and precision of 0.915. Upgrading the model capacity also reduces MPJPE from 8.250 cm to 7.674 cm.
 
@@ -109,7 +109,7 @@ Finally, \cref{fig:eval-by-config} shows how different more advanced configurati
     \label{fig:qual-salsa-good}
   \end{subfigure}
   \hfill
-  \caption{Two example scenes showing the impact of using skeletal constrained for the results obtained on the exact same segment of the SALSA dataset.}
+  \caption{Two example scenes showing the impact of using skeletal constraints for the results obtained on the exact same segment of the SALSA dataset.}
   \label{fig:qual-salsa}
 \end{figure*}
 
@@ -131,10 +131,10 @@ Another commonly observed failure is shown in \cref{fig:qual-single}. When a per
 \Cref{fig:qual-single2} shows another issue that can occur when only a single camera is able to see a given person. In this case, the track has already been initialized, but the person has moved into a location where they are no longer seen by two cameras. In this case the depth coordinate from the camera can drift as the person moves, causing distorted skeletons before and behind the actual ground truth. This problem is mitigated by the introduction of skeletal constraints, because it forces the skeleton to retain approximately the same size.
 
 \paragraph{Detection of Person While Exiting}
-\Cref{fig:qual-leave} show a failure that occurs when a person leaves the room. In this case, the camera that is pointing at the exit will see the person for longer than the actual ground truth indicates. This causes false positives and therefore worse MOTA and Precision. Note that in this case we also have the above-mentioned issue of an active track seen by only one camera.
+\Cref{fig:qual-leave} shows a failure that occurs when a person leaves the room. In this case, the camera that is pointing at the exit will see the person for longer than the actual ground truth indicates. This causes false positives and therefore worse MOTA and Precision. Note that in this case we also have the above-mentioned issue of an active track seen by only one camera.
 
 
 \subsubsection{Impact of the Skeletal Constraints}
 
-The addition of skeletal constraints can help significantly improve the tracking performance especially in difficult situations where people are only partially visible. The choice of making the constraints be symmetric also helps in cases where only one side of a person is fully visible. \Cref{fig:qual-salsa} shows a scene from the SALSA dataset. In \cref{fig:qual-salsa-bad} it shows the result obtained when using the baseline configuration of the system, while \cref{fig:qual-salsa-good} shows the exact same scene but with the tracking system configured to use skeletal constraints. It is clearly evident that the skeletal constraints help prevent that individual keypoints of partially occluded people are pulled away from the rest of the skeleton, because in order to do that the limb length would have to increase.
+The addition of skeletal constraints can help significantly improve the tracking performance especially in difficult situations where people are only partially visible. The choice of making the constraints be symmetric also helps in cases where only one side of a person is fully visible. \Cref{fig:qual-salsa} shows a scene from the SALSA dataset. In \cref{fig:qual-salsa-bad} it shows the result obtained when using the baseline configuration of the system, while \cref{fig:qual-salsa-good} shows the exact same scene but with the tracking system configured to use skeletal constraints. It is clearly evident that the skeletal constraints help prevent individual keypoints of partially occluded people from being pulled away from the rest of the skeleton, because in order to do that the limb length would have to increase.
 
