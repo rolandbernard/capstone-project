@@ -117,60 +117,18 @@
       Problem: {\footnotesize Track poses of multiple people in videos across multiple views.}
     \end{oitem}
     \begin{oitem}{\litem}
-      Possible Applications: \\
-      \sitem {\footnotesize Robotics and human-robot interactions.} \\
-      \sitem {\footnotesize In healthcare, for tasks such as gait analysis or remote patient monitoring.} \\
-      \sitem {\footnotesize For real-time motion capture or natural body-based control interfaces for gaming.}
+      Given: \\
+      \sitem {\footnotesize Multiple synchronously recorded video sequences containing multiple people.} \\
+      \sitem {\footnotesize Camera calibration parameters, including extrinsics, intrinsic and distortion.}
     \end{oitem}
     \begin{oitem}{\litem}
-      Objectives of this project: \\
-      \sitem {\footnotesize Develop and evaluate a 3D pose tracking pipeline.}
+      Output: \\
+      \sitem {\footnotesize 3D coordinates of skeletal joints for each subject over time.}
     \end{oitem}
     \begin{figure}
       \centering
       \includegraphics[width=0.9\linewidth]{figures/approach.pdf}
     \end{figure}
-  \end{items}
-\end{frame}
-
-\begin{frame}
-\frametitle{Task Formulation}
-  \begin{items}
-    \begin{oitem}{\litem}
-      Given: \\
-      \sitem {\footnotesize Multiple video sequences containing multiple people.} \\
-      \sitem {\footnotesize Recorded synchronously from multiple camera views.} \\
-      \sitem {\footnotesize Camera calibration parameters, including extrinsics, intrinsic and distortion.}
-    \end{oitem}
-    \begin{oitem}{\litem}
-      Output: \\
-      \sitem {\footnotesize 3D coordinates of skeletal joints for each subject.} \\
-      \sitem {\footnotesize Temporally consistent movement of skeletal joints over time.}
-    \end{oitem}
-    \begin{center}
-      \begin{tikzpicture}[
-          node distance=10mm,>=Latex,
-          base_node/.style={minimum height=5mm,align=center,text width=3cm},
-          icon_node/.style={minimum size=7mm,align=center}
-      ]
-          \node (satellite) [icon_node] {\fontsize{40pt}{40pt}\selectfont\faVideo};
-          \node [below=1mm of satellite, font=\scriptsize] {Calibrated Cameras};
-          \node [base_node, right=of satellite, inner sep=-5mm, yshift=6, xshift=6] {\includegraphics[width=15mm]{figures/examples/example1.png}};
-          \node [base_node, right=of satellite, inner sep=-5mm, yshift=4, xshift=4] {\includegraphics[width=15mm]{figures/examples/example2.png}};
-          \node [base_node, right=of satellite, inner sep=-5mm, yshift=2, xshift=2] {\includegraphics[width=15mm]{figures/examples/example3.png}};
-          \node (image_data) [base_node, right=of satellite, inner sep=-5mm] {\includegraphics[width=15mm]{figures/examples/example4.png}};
-          \node [below=6.25mm of image_data, font=\scriptsize] {Multi-View Video};
-          \node (machine_learning) [icon_node, right=of image_data] {
-            \fontsize{40pt}{40pt}\selectfont\faRobot
-          };
-          \node [below=1mm of machine_learning, font=\scriptsize] {CV System};
-          \node (pred) [base_node, right=of machine_learning, inner sep=-5mm] {\includegraphics[width=15mm]{figures/example-out.png}};
-          \node [below=6.25mm of pred, font=\scriptsize] {Predict 3D Skeletons};
-          \draw[->, thick] (satellite) -- (image_data);
-          \draw[->, thick] (image_data) -- (machine_learning);
-          \draw[->, thick] (machine_learning) -- (pred);
-      \end{tikzpicture}
-    \end{center}
   \end{items}
 \end{frame}
 
@@ -239,7 +197,7 @@
       \sitem {\footnotesize Assume limb lengths do not change and are left-right symmetrical.} \\
       \sitem {\footnotesize Adding length values to the state vector of the filter.} \\
       \sitem {\footnotesize No direct interaction with other state values and very low process noise.} \\
-      \sitem {\footnotesize Pseudo-observation merged into each update step that observes constraint violation of 0.}
+      \sitem {\footnotesize Pseudo-observation merged into each update step with constant value of 0.}
     \end{oitem}
     \begin{columns}[c]
       \begin{column}{0.85\textwidth}
@@ -267,40 +225,10 @@
       Summary: \\
       \sitem {\footnotesize Learning the complete pipeline end-to-end unfeasible.} \\
       \sitem {\footnotesize Split the learning into three independent parts that are learned separately.} \\
-      \sitem {\footnotesize Training is done using the CMU Panoptic dataset excluding sequences used for testing.} \\
+      \sitem {\footnotesize Training is done using the ground-truth annotated CMU Panoptic dataset.} \\
       \sitem {\footnotesize Sequences reserved for testing are excluded from the training.}
     \end{oitem}
     \input{tikzfigures/learning.tex}
-  \end{items}
-\end{frame}
-
-\begin{frame}
-\frametitle{Learning Parameters from Data -- Custom YOLO Head}
-  \begin{items}
-    \begin{oitem}{\litem}
-      Summary: \\
-      \sitem {\footnotesize Standard YOLO does not provide uncertainty output and does not predict invisible joints.} \\
-      \sitem {\footnotesize Dataset generated from CMU Panoptic by training random camera view every second.} \\
-      \sitem {\footnotesize Custom head outputs $x$ and $y$ offsets as well as covariance matrix.} \\
-      \sitem {\footnotesize Final layer of head is initialized to zero to start training with reasonable values.} \\
-      \sitem {\footnotesize Extensive data augmentation is performed to avoid overfitting.}
-    \end{oitem}
-    \input{tikzfigures/learning_yolo.tex}
-  \end{items}
-\end{frame}
-
-\begin{frame}
-\frametitle{Learning Parameters from Data -- Kalman Filter}
-  \begin{items}
-    \begin{oitem}{\litem}
-      Summary: \\
-      \sitem {\footnotesize Used only the annotations of the CMU Panoptic dataset.} \\
-      \sitem {\footnotesize Dataset generated by extracting individual persons tracks from annotations.} \\
-      \sitem {\footnotesize Learns all the parameters of the Kalman filter such as dynamics and constraints.} \\
-      \sitem {\footnotesize Training by taking 100 frame segments of the ground truth tracks.} \\
-      \sitem {\footnotesize Then generating synthetic observations, running filter, and minimizing MSE.}
-    \end{oitem}
-    \input{tikzfigures/learning_kalman.tex}
   \end{items}
 \end{frame}
 
@@ -361,6 +289,36 @@ tracks n COCO19 format.}
 \end{frame}
 
 \begin{frame}
+\frametitle{Learning Parameters from Data -- Custom YOLO Head}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Standard YOLO does not provide uncertainty output and does not predict invisible joints.} \\
+      \sitem {\footnotesize Dataset generated from CMU Panoptic by training random camera view every second.} \\
+      \sitem {\footnotesize Custom head outputs $x$ and $y$ offsets as well as covariance matrix.} \\
+      \sitem {\footnotesize Final layer of head is initialized to zero to start training with reasonable values.} \\
+      \sitem {\footnotesize Extensive data augmentation is performed to avoid overfitting.}
+    \end{oitem}
+    \input{tikzfigures/learning_yolo.tex}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Learning Parameters from Data -- Kalman Filter}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Summary: \\
+      \sitem {\footnotesize Used only the annotations of the CMU Panoptic dataset.} \\
+      \sitem {\footnotesize Dataset generated by extracting individual persons tracks from annotations.} \\
+      \sitem {\footnotesize Learns all the parameters of the Kalman filter such as dynamics and constraints.} \\
+      \sitem {\footnotesize Training by taking 100 frame segments of the ground truth tracks.} \\
+      \sitem {\footnotesize Then generating synthetic observations, running filter, and minimizing MSE.}
+    \end{oitem}
+    \input{tikzfigures/learning_kalman.tex}
+  \end{items}
+\end{frame}
+
+\begin{frame}
 \frametitle{Experimental Setup}
   \begin{items}
     \begin{oitem}{\litem}
@@ -377,24 +335,6 @@ tracks n COCO19 format.}
       \sitem {\footnotesize Multi-Object Tracking Accuracy (MOTA).} \\
       \sitem {\footnotesize Also collected Precision and Recall.}
     \end{oitem}
-  \end{items}
-\end{frame}
-
-\begin{frame}
-\frametitle{Quantitative Results -- Runtime Efficiency}
-  \begin{items}
-    \begin{oitem}{\litem}
-      Main Finding: \\
-      \sitem {\footnotesize Detection is the largest part of the execution time per frame.} \\
-      \sitem {\footnotesize Execution time of detection scales linearly with number of cameras.} \\
-      \sitem {\footnotesize Matching and filtering also scale with camera count but slight less quickly.}
-    \end{oitem}
-    \begin{widepage}
-      \begin{figure}
-        \centering
-        \includegraphics[width=\linewidth]{figures/execution_time_breakdown_cams.pdf}
-      \end{figure}
-    \end{widepage}
   \end{items}
 \end{frame}
 
@@ -447,6 +387,24 @@ tracks n COCO19 format.}
       \begin{figure}
         \centering
         \includegraphics[width=\linewidth]{figures/improvements_comparison_4_cams.pdf}
+      \end{figure}
+    \end{widepage}
+  \end{items}
+\end{frame}
+
+\begin{frame}
+\frametitle{Quantitative Results -- Runtime Efficiency}
+  \begin{items}
+    \begin{oitem}{\litem}
+      Main Finding: \\
+      \sitem {\footnotesize Detection is the largest part of the execution time per frame.} \\
+      \sitem {\footnotesize Execution time of detection scales linearly with number of cameras.} \\
+      \sitem {\footnotesize Matching and filtering also scale with camera count but slight less quickly.}
+    \end{oitem}
+    \begin{widepage}
+      \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{figures/execution_time_breakdown_cams.pdf}
       \end{figure}
     \end{widepage}
   \end{items}

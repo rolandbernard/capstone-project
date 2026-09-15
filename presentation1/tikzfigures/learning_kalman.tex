@@ -25,7 +25,7 @@
     \node[base_node, right=7 of merge_box] (match_box) {
       \includegraphics[width=15mm]{figures/match.pdf}
     };
-    \node[below_label, below=0 of match_box] (match_label) {Compute MSE $\mathcal{L}$};
+    \node[below_label, below=0 of match_box] (match_label) {Compute MSE Loss};
 
     \draw[flow] (merge_box) |- (predict_box);
     \draw[flow] (predict_box) -- (kf_box);
